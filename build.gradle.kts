@@ -1,14 +1,16 @@
-// The Kotlin plugins are declared once here, with `apply false`, because both
-// modules use them and declaring a version in each makes Gradle load the plugin
-// twice - which it warns about and does not support.
+// Intentionally declares no plugins.
 //
-// The Android plugin is deliberately NOT declared here. It is used by :app
-// alone, so there is no duplication to solve, and hoisting it would force every
-// build to resolve it - including a :core-only build on a machine with no
-// Android SDK and no access to Google's Maven repository. Keeping it in :app
-// preserves the property that the protocol module builds with nothing but a JDK.
-plugins {
-    alias(libs.plugins.kotlin.jvm) apply false
-    alias(libs.plugins.kotlin.android) apply false
-    alias(libs.plugins.kotlin.compose) apply false
-}
+// Gradle warns that the Kotlin plugin is loaded once per module and suggests
+// hoisting it here with `apply false`. That was tried and reverted, because the
+// Kotlin Android plugin and the Android plugin must share a classloader:
+// hoisting Kotlin while leaving AGP in :app puts them in parent and child
+// loaders respectively, and applying kotlin-android then dies with
+// NoClassDefFoundError on com/android/build/gradle/api/BaseVariant.
+//
+// The consistent alternative is hoisting AGP as well, but that forces every
+// build to resolve AGP - including a :core-only build on a machine with no
+// Android SDK and no reachable Google Maven repository, which is exactly the
+// configuration the module split exists to support and the one CI runs.
+//
+// So the warning is accepted deliberately. It is cosmetic: both modules request
+// the same Kotlin version, and the build works.

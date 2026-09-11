@@ -1,10 +1,11 @@
 plugins {
-    // AGP is used only here, so it carries its own version. The Kotlin plugin
-    // versions come from the root project, which is what stops Gradle loading
-    // the Kotlin plugin once per module.
+    // These carry explicit versions rather than inheriting from the root
+    // project. See the comment in the root build.gradle.kts: the Kotlin Android
+    // and Android plugins have to load in the same classloader, and hoisting
+    // only some of them breaks that.
     alias(libs.plugins.android.application)
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
 }
 
 android {
