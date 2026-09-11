@@ -35,6 +35,13 @@ on a live vehicle. See [docs/PROTOCOL.md](docs/PROTOCOL.md).
 **What the app cannot tell you is what the configuration bytes mean.** That is
 Ford's data. Get the factory As-Built for your VIN and work from it.
 
+**It can, however, learn the parts it would otherwise guess at.** Three things -
+which identifiers hold As-Built blocks, which checksum algorithm your modules
+use, and which RoutineControl identifiers are real - cannot be derived from
+first principles, but are plainly visible in a recording of a tool that already
+knows. Import a FORScan trace or any candump-style capture and all three become
+measurements instead of guesses. See [docs/TRACE_IMPORT.md](docs/TRACE_IMPORT.md).
+
 ## Hardware
 
 You need an STN-chipset adapter - an **OBDLink EX** (USB) or **MX+**
@@ -53,7 +60,7 @@ empty list. Details in [docs/HARDWARE.md](docs/HARDWARE.md).
              dependencies, so it builds and tests with just a JDK.
     app/     Android front end. Compose UI plus the three transports
              (Bluetooth Classic, BLE, USB serial).
-    docs/    Hardware guide, protocol notes, As-Built guide.
+    docs/    Hardware guide, protocol notes, As-Built guide, trace importing.
 
 The split is deliberate: all the logic that is hard to get right lives in a
 module you can test without a phone, an adapter, or a truck.

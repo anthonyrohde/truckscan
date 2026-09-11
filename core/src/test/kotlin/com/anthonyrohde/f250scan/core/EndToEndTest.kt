@@ -441,6 +441,77 @@ class EndToEndTest {
         assertEquals("PCM", pcm.module.code)
     }
 
+    // ------------------------------------------------- learned profile integration
+
+    @Test
+    fun `an imported profile makes as built reads use the learned identifiers`() = runBlocking {
+        val engine = engine()
+        engine.connect()
+        val bcm = engine.quickScanVehicle().first { it.module.code == "BCM" }
+
+        // A capture covering only DE00 and DE01, not the whole DE00-DE3F range.
+        val profile = com.anthonyrohde.f250scan.core.trace.LearnedProfile.deserialise(
+            """
+            # f250scan learned profile v1
+            # source: bcm-capture.txt
+            module 726 72E
+              checksum TWOS_COMPLEMENT
+              config DE00 410200001C0899
+              config DE01 00300000D0
+            """.trimIndent(),
+        )
+        assertNotNull(profile)
+        engine.applyLearnedProfile(profile)
+
+        val probed = mutableListOf<Int>()
+        val snapshot = engine.snapshotAsBuilt(bcm) { probed += it.currentDid }
+
+        // Exactly the learned identifiers were read - not a 448-wide sweep.
+        assertEquals(listOf(0xDE00, 0xDE01), probed)
+        assertEquals(2, snapshot.blocks.size)
+        assertEquals(
+            com.anthonyrohde.f250scan.core.ford.ChecksumStrategy.TWOS_COMPLEMENT,
+            snapshot.checksumStrategy,
+        )
+        assertTrue(snapshot.isRestorable)
+    }
+
+    @Test
+    fun `without a profile the reader falls back to sweeping`() = runBlocking {
+        val engine = engine()
+        engine.connect()
+        val bcm = engine.quickScanVehicle().first { it.module.code == "BCM" }
+        engine.applyLearnedProfile(null)
+
+        val probed = mutableListOf<Int>()
+        engine.asBuiltReader.snapshot(bcm, ranges = listOf(0xDE00..0xDE05)) {
+            probed += it.currentDid
+        }
+
+        assertEquals(6, probed.size, "the whole requested range should be swept")
+    }
+
+    @Test
+    fun `a profile for a different module does not affect this one`() = runBlocking {
+        val engine = engine()
+        engine.connect()
+        val bcm = engine.quickScanVehicle().first { it.module.code == "BCM" }
+
+        // Profile covers the APIM (7D0), not the BCM (726).
+        val profile = com.anthonyrohde.f250scan.core.trace.LearnedProfile.deserialise(
+            """
+            module 7D0 7D8
+              config DE00 0000000500009C
+            """.trimIndent(),
+        )
+        engine.applyLearnedProfile(profile)
+
+        // Falls back to the sweep for the uncovered module rather than reading
+        // the other module's identifiers.
+        val snapshot = engine.asBuiltReader.snapshot(bcm, ranges = listOf(0xDE00..0xDE05))
+        assertEquals(3, snapshot.blocks.size, "BCM's own three blocks")
+    }
+
     // ------------------------------------------------------------------ helpers
 
     /** Produces a change that flips one byte of the first configuration block. */

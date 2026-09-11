@@ -26,7 +26,9 @@ This distinction is the whole point of this document.
   community-held 0xDE00 convention, but `AsBuiltReader.discoverDids` sweeps the
   candidate ranges and records which identifiers the module actually answers.
   Slower than a lookup table, but a measurement rather than a guess - and it
-  still works on a module nobody has documented.
+  still works on a module nobody has documented. Better still, import a bus
+  capture and the sweep is replaced by the identifiers a working tool was
+  observed reading: see [TRACE_IMPORT.md](TRACE_IMPORT.md).
 - *The checksum algorithm.* Not published. `ChecksumStrategy` holds the
   plausible byte-sum variants, and `detect` identifies which one your modules
   actually use by testing candidates against blocks already read from the truck.

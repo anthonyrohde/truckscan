@@ -5,6 +5,7 @@ import com.anthonyrohde.f250scan.core.ford.AsBuiltDidMap
 import com.anthonyrohde.f250scan.core.ford.AsBuiltSnapshot
 import com.anthonyrohde.f250scan.core.ford.ChecksumStrategy
 import com.anthonyrohde.f250scan.core.isotp.IsoTpChannel
+import com.anthonyrohde.f250scan.core.trace.LearnedModule
 import com.anthonyrohde.f250scan.core.uds.DiagnosticSession
 import com.anthonyrohde.f250scan.core.uds.UdsClient
 
@@ -109,6 +110,56 @@ class AsBuiltReader(
             capturedAtEpochMillis = System.currentTimeMillis(),
             blocks = blocks,
             checksumStrategy = strategy,
+            sourceDids = raw.keys.toList(),
+            partNumber = identification?.partNumber,
+            calibrationLevel = identification?.calibrationLevel,
+        )
+    }
+
+    /**
+     * Takes a snapshot using identifiers learned from a bus capture.
+     *
+     * This is the fast, exact path. Instead of sweeping several hundred
+     * candidate identifiers and hoping the 0xDE00 convention holds, it reads
+     * the identifiers a working tool was actually observed reading on this
+     * module - typically a handful, so the read takes a second rather than a
+     * minute, and finds blocks a blind sweep of the wrong range would miss
+     * entirely.
+     *
+     * The checksum algorithm from the capture is preferred over re-deriving it,
+     * since a capture usually offers more blocks to test against than one live
+     * read does. It still falls back to live detection if the capture could not
+     * determine one.
+     */
+    suspend fun snapshotFromProfile(
+        module: DiscoveredModule,
+        learned: LearnedModule,
+        onProgress: ((AsBuiltScanProgress) -> Unit)? = null,
+    ): AsBuiltSnapshot {
+        val client = clientFor(module)
+        runCatching { client.startSession(DiagnosticSession.EXTENDED) }
+
+        val order = learned.readOrder()
+        val raw = linkedMapOf<Int, ByteArray>()
+
+        order.forEachIndexed { index, did ->
+            client.tryReadDataByIdentifier(did, 1_500)?.let { data ->
+                if (data.isNotEmpty()) raw[did] = data
+            }
+            onProgress?.invoke(AsBuiltScanProgress(index + 1, order.size, raw.size, did))
+        }
+
+        val identification = runCatching { ModuleIdentification.read(clientFor(module)) }
+            .getOrNull()
+        val (blocks, derived) = interpretBlocks(module.module.requestId, raw)
+
+        return AsBuiltSnapshot(
+            moduleCode = module.module.code,
+            moduleAddress = module.module.requestId,
+            vin = identification?.vin,
+            capturedAtEpochMillis = System.currentTimeMillis(),
+            blocks = blocks,
+            checksumStrategy = learned.checksumStrategy ?: derived,
             sourceDids = raw.keys.toList(),
             partNumber = identification?.partNumber,
             calibrationLevel = identification?.calibrationLevel,

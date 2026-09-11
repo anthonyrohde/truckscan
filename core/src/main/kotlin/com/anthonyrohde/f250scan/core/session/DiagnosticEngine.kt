@@ -7,6 +7,8 @@ import com.anthonyrohde.f250scan.core.ford.SecurityAccessManager
 import com.anthonyrohde.f250scan.core.isotp.IsoTpChannel
 import com.anthonyrohde.f250scan.core.isotp.IsoTpConfig
 import com.anthonyrohde.f250scan.core.pid.PidCatalog
+import com.anthonyrohde.f250scan.core.trace.LearnedProfile
+import com.anthonyrohde.f250scan.core.trace.securityAccessManager
 import com.anthonyrohde.f250scan.core.transport.ObdTransport
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -57,6 +59,47 @@ class DiagnosticEngine(
 
     var asBuiltWriter: AsBuiltWriter = AsBuiltWriter(channel, securityAccessManager, logger)
         private set
+
+    /**
+     * Facts learned from an imported bus capture, if one has been loaded.
+     *
+     * Setting this replaces guesswork with measurement in three places: As-Built
+     * reads go straight to the identifiers known to exist, the checksum
+     * algorithm is taken from real blocks, and any captured security handshake
+     * becomes available for replay.
+     */
+    private val _learnedProfile = MutableStateFlow<LearnedProfile?>(null)
+    val learnedProfile: StateFlow<LearnedProfile?> = _learnedProfile.asStateFlow()
+
+    fun applyLearnedProfile(profile: LearnedProfile?) {
+        _learnedProfile.value = profile
+        securityAccessManager = profile?.securityAccessManager(logger)
+            ?: SecurityAccessManager(logger = logger)
+        logger?.invoke(
+            profile?.let { "Applied learned profile: ${it.modules.size} module(s)" }
+                ?: "Cleared learned profile",
+        )
+    }
+
+    /**
+     * Reads a module's configuration, using the learned profile when it covers
+     * this module and falling back to the discovery sweep when it does not.
+     */
+    suspend fun snapshotAsBuilt(
+        module: DiscoveredModule,
+        onProgress: ((AsBuiltScanProgress) -> Unit)? = null,
+    ): com.anthonyrohde.f250scan.core.ford.AsBuiltSnapshot {
+        val learned = _learnedProfile.value?.module(module.module.requestId)
+        return if (learned != null && learned.readOrder().isNotEmpty()) {
+            logger?.invoke(
+                "Using ${learned.readOrder().size} learned identifier(s) for " +
+                    "${module.module.code} instead of a range sweep",
+            )
+            asBuiltReader.snapshotFromProfile(module, learned, onProgress)
+        } else {
+            asBuiltReader.snapshot(module, onProgress = onProgress)
+        }
+    }
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()

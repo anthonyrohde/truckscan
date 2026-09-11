@@ -69,6 +69,40 @@ interface SeedKeyAlgorithm {
         }
     }
 
+    /**
+     * Replays a seed/key pair captured from a working tool.
+     *
+     * Deliberately narrow, and worth understanding before relying on it. A
+     * captured pair proves nothing about the *algorithm* - it is one input and
+     * one output. Replaying it only unlocks the module if the module issues
+     * that exact seed again.
+     *
+     * Whether it does is a property of the module, not of this code. Some issue
+     * a fixed or small-set seed, in which case a capture is genuinely enough.
+     * Most current modules randomise, in which case this will almost never hit
+     * and the honest answer stays "we cannot derive the key".
+     *
+     * Pairs are supplied as raw (seed, key) byte arrays rather than as a trace
+     * type, so that the Ford layer stays independent of the trace importer.
+     */
+    class Replay(pairs: List<Pair<ByteArray, ByteArray>>) : SeedKeyAlgorithm {
+
+        override val name = "Replay of ${pairs.size} captured handshake(s)"
+
+        // Indexed by seed so lookup is exact rather than a linear scan with
+        // array identity comparison, which would never match.
+        private val bySeed: Map<String, ByteArray> =
+            pairs.associate { (seed, key) -> seed.toHex() to key }
+
+        override fun computeKey(seed: ByteArray, securityLevel: Int): ByteArray? =
+            bySeed[seed.toHex()]
+
+        /** True when [seed] was seen in the capture. */
+        fun canAnswer(seed: ByteArray): Boolean = bySeed.containsKey(seed.toHex())
+
+        val observedSeedCount: Int get() = bySeed.size
+    }
+
     /** Wraps a caller-supplied derivation. */
     class Custom(
         override val name: String,
