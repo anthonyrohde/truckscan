@@ -7,6 +7,8 @@ lifecycle = "2.8.7"
 room = "2.6.1"
 activityCompose = "1.9.3"
 navigation = "2.8.5"
+# usb-serial-for-android, via JitPack. If the build reports this version is
+# missing, check the tags at github.com/mik3y/usb-serial-for-android and bump.
 usbSerial = "3.8.1"
 junit = "5.11.4"
 

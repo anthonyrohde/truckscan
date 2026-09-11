@@ -10,6 +10,15 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+
+        // usb-serial-for-android is published through JitPack, not Maven
+        // Central. Without this the :app build fails to resolve it. The content
+        // filter keeps JitPack out of the lookup path for everything else,
+        // since it is slow to answer for artifacts it does not host.
+        maven {
+            url = uri("https://jitpack.io")
+            content { includeGroupByRegex("com\\.github\\..*") }
+        }
     }
 }
 

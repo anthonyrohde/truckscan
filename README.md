@@ -93,3 +93,45 @@ bytes are invented. It will not tell you anything about your own truck.
 - Never write to a module on a weak battery. The app refuses below 12.0 V.
 - Keep your backups off the phone. They are plain text files for exactly that
   reason.
+
+## Building the Android app
+
+The `:app` module needs an Android SDK; `:core` does not. `settings.gradle.kts`
+**skips `:app` entirely when no SDK is found**, so if `./gradlew projects` does
+not list it, that is why — it is not a broken checkout.
+
+1. **Install Android Studio** (or just the command-line tools). Through the SDK
+   Manager install **SDK Platform 35** and the latest **Android SDK
+   Build-Tools**.
+
+2. **Point the build at the SDK.** Either set `ANDROID_HOME`, or create
+   `local.properties` in the repository root:
+
+       sdk.dir=C\:\\Users\\you\\AppData\\Local\\Android\\Sdk     # Windows
+       sdk.dir=/Users/you/Library/Android/sdk                    # macOS
+       sdk.dir=/home/you/Android/Sdk                             # Linux
+
+   `local.properties` is gitignored, which is correct — it is machine-specific.
+
+3. **Use JDK 17 or newer.** Android Gradle Plugin 8.7.3 requires it. Android
+   Studio bundles a suitable JDK; from the command line check with `java -version`.
+
+4. **Build:**
+
+       ./gradlew :app:assembleDebug          # macOS / Linux
+       gradlew.bat :app:assembleDebug        # Windows
+
+   The APK lands in `app/build/outputs/apk/debug/`.
+
+5. **Install it** with `adb install -r app/build/outputs/apk/debug/app-debug.apk`,
+   or just press Run in Android Studio.
+
+Verify the toolchain first with `./gradlew projects` — if `:app` appears in the
+list, the SDK was found.
+
+### Expect to fix some Compose calls
+
+The protocol module is compiled and tested; `:app` has never been compiled,
+because it was written in an environment with no Android SDK. Expect a handful
+of Compose or API signature errors on the first build. They will be ordinary
+compile errors with clear messages, not design problems.
