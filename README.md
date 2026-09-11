@@ -129,9 +129,15 @@ not list it, that is why — it is not a broken checkout.
 Verify the toolchain first with `./gradlew projects` — if `:app` appears in the
 list, the SDK was found.
 
-### Expect to fix some Compose calls
+### A note on the build warning
 
-The protocol module is compiled and tested; `:app` has never been compiled,
-because it was written in an environment with no Android SDK. Expect a handful
-of Compose or API signature errors on the first build. They will be ordinary
-compile errors with clear messages, not design problems.
+Gradle warns that the Kotlin plugin is loaded once per module. That is
+deliberate, and the reasoning is recorded in the root `build.gradle.kts`:
+hoisting the Kotlin plugins to the root while AGP stays in `:app` puts them in
+different classloaders and breaks `kotlin-android` outright, and hoisting AGP
+too would force every build to resolve it - including the `:core`-only builds
+that run without an Android SDK. The warning is cosmetic; both modules request
+the same Kotlin version.
+
+`:app` compiles and assembles. `:core` additionally has 139 passing tests; the
+app layer has no automated tests, so its screens are verified by running them.
