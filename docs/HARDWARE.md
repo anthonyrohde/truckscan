@@ -25,13 +25,41 @@ rather than where it was expected.
 
 ## What to buy
 
-**OBDLink EX (USB).** The best option if you do not mind a cable. No radio, no
-pairing, no dropouts, highest throughput. Use this for anything long-running -
-a full As-Built read, a logging session. Needs a USB OTG adapter for your phone.
+**OBDLink EX (USB).** FORScan's own top recommendation, and the best option if
+you do not mind a cable. No radio, no pairing, no dropouts, highest throughput.
+Use it for anything long-running - a full As-Built read, a logging session.
+Needs a USB OTG adapter to reach an Android phone.
 
-**OBDLink MX+ (Bluetooth Classic).** The best wireless option. Classic SPP gives
-a plain byte stream with far better throughput than BLE, and throughput sets your
-live-data sample rate.
+Two of its published specifications matter to how this app is written:
+
+- **Electronic MS-CAN/HS-CAN switching, with simultaneous access to both.**
+  Unlike a "toggle switch" adapter, which physically bridges the connector pins
+  and is therefore on exactly one bus at a time, the EX switches under software
+  control and can hold both buses at once. It also avoids the network
+  interference a physical bridge can cause.
+- **2,000 kbit/s link rate**, with 4K block transfers and a claimed 20x faster
+  upload than toggle-switch adapters.
+
+`UsbSerialTransport` negotiates the line rate downward from 2 Mbit/s rather than
+assuming one, so the EX is not throttled to the 115,200 that suits a cheaper
+bridge.
+
+Note that `ElmAdapter.selectBus` still configures **one bus at a time**. That is
+correct for every adapter and is all a toggle-switch device can do, but it does
+not exploit the EX's simultaneous access: scanning across HS-CAN1 and MS-CAN
+reconfigures between them rather than interleaving. Reconfiguration is fast and
+software-driven on this hardware, so the cost is modest, but there is real
+headroom here for a quicker whole-vehicle scan.
+
+**OBDLink MX+ (Bluetooth Classic).** The best wireless option, and also
+recommended by the FORScan team. Classic SPP gives a plain byte stream with far
+better throughput than BLE, and throughput sets your live-data sample rate. It
+supports MS-CAN natively, with no manual switch.
+
+Worth knowing if you read older forum threads claiming the MX+ cannot do MS-CAN:
+it uses the STN2255, which older FORScan builds misdetected as a plain ELM327
+and consequently would not drive on MS-CAN. Fixed in FORScan for Windows
+v2.3.19.
 
 **Do not buy a generic ELM327 clone** if you care about anything beyond the
 engine and transmission. It is wired to pins 6/14 only. The app will connect,
