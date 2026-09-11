@@ -47,15 +47,30 @@ class SimulatedVehicleTransport(
 
     // ------------------------------------------------------------- simulated ECUs
 
-    /** One simulated module. */
+    /**
+     * One simulated module.
+     *
+     * [bitrateBps] is what makes the simulator model bus affinity: a module
+     * only answers while the adapter is configured for its bus. Without that
+     * the simulator answers everything regardless of bus selection, which
+     * hides exactly the class of bug where code forgets to switch buses
+     * before addressing a module.
+     */
     private class SimModule(
         val requestId: Int,
         val code: String,
+        val bitrateBps: Int,
         val dids: MutableMap<Int, ByteArray>,
         val dtcs: MutableList<Triple<Int, Int, Int>>, // code high, code low, status
     ) {
         val responseId: Int get() = requestId + 8
     }
+
+    /** Bitrate the adapter is currently configured for. Defaults to HS-CAN. */
+    private var selectedBitrate: Int = HIGH_SPEED_BPS
+
+    /** Rate staged by `ATPB`, applied when `ATSPB` selects protocol B. */
+    private var stagedProtocolBBitrate: Int = HIGH_SPEED_BPS
 
     private fun ascii(text: String, length: Int): ByteArray {
         val bytes = text.toByteArray(Charsets.US_ASCII)
@@ -65,7 +80,7 @@ class SimulatedVehicleTransport(
 
     private val modules: Map<Int, SimModule> = listOf(
         SimModule(
-            requestId = 0x7E0, code = "PCM",
+            requestId = 0x7E0, code = "PCM", bitrateBps = HIGH_SPEED_BPS,
             dids = mutableMapOf(
                 0xF190 to ascii("1FT8W2BT7NEC12345", 17),
                 0xF187 to ascii("LC3A-14C204-BFD", 16),
@@ -85,7 +100,7 @@ class SimulatedVehicleTransport(
             ),
         ),
         SimModule(
-            requestId = 0x7E1, code = "TCM",
+            requestId = 0x7E1, code = "TCM", bitrateBps = HIGH_SPEED_BPS,
             dids = mutableMapOf(
                 0xF190 to ascii("1FT8W2BT7NEC12345", 17),
                 0xF187 to ascii("LC3P-7J012-AC", 14),
@@ -93,7 +108,7 @@ class SimulatedVehicleTransport(
             dtcs = mutableListOf(),
         ),
         SimModule(
-            requestId = 0x726, code = "BCM",
+            requestId = 0x726, code = "BCM", bitrateBps = MEDIUM_SPEED_BPS,
             dids = mutableMapOf(
                 0xF190 to ascii("1FT8W2BT7NEC12345", 17),
                 0xF187 to ascii("LC3T-14B476-AKE", 16),
@@ -107,7 +122,7 @@ class SimulatedVehicleTransport(
             ),
         ),
         SimModule(
-            requestId = 0x720, code = "IPC",
+            requestId = 0x720, code = "IPC", bitrateBps = MEDIUM_SPEED_BPS,
             dids = mutableMapOf(
                 0xF187 to ascii("LC3T-10849-AAB", 14),
                 0xDE00 to withTwosComplement(byteArrayOf(0x10, 0x00, 0x04, 0x22)),
@@ -115,7 +130,7 @@ class SimulatedVehicleTransport(
             dtcs = mutableListOf(),
         ),
         SimModule(
-            requestId = 0x7D0, code = "APIM",
+            requestId = 0x7D0, code = "APIM", bitrateBps = MEDIUM_SPEED_BPS,
             dids = mutableMapOf(
                 0xF187 to ascii("LU5T-14G371-BAE", 16),
                 0xDE00 to withTwosComplement(byteArrayOf(0x00, 0x00, 0x00, 0x05, 0x00, 0x00)),
@@ -238,6 +253,25 @@ class SimulatedVehicleTransport(
                 prompt()
             }
 
+            // --- bus selection. Tracked so module bus affinity can be modelled.
+            upper.startsWith("ATPB") -> {
+                // AT PB <options> <divisor>; data rate = 500 kbps / divisor.
+                val divisor = upper.removePrefix("ATPB").trim()
+                    .split(Regex("\\s+")).getOrNull(1)?.toIntOrNull(16)
+                stagedProtocolBBitrate =
+                    if (divisor != null && divisor > 0) HIGH_SPEED_BPS / divisor
+                    else HIGH_SPEED_BPS
+                ok()
+            }
+            upper == "ATSPB" -> { selectedBitrate = stagedProtocolBBitrate; ok() }
+            upper == "ATSP6" || upper == "ATSP7" -> { selectedBitrate = HIGH_SPEED_BPS; ok() }
+            upper.startsWith("STPBR") -> {
+                upper.removePrefix("STPBR").trim().toIntOrNull()
+                    ?.let { selectedBitrate = it }
+                ok()
+            }
+            upper.startsWith("STP ") -> { selectedBitrate = HIGH_SPEED_BPS; ok() }
+
             // Everything else in the AT/ST space is accepted without effect.
             upper.startsWith("AT") || upper.startsWith("ST") -> ok()
 
@@ -309,6 +343,10 @@ class SimulatedVehicleTransport(
         // Functional address: only the powertrain answers mode 01/03/09.
         val module = if (requestId == 0x7DF) modules[0x7E0] else modules[requestId] ?: return null
         if (module == null) return null
+
+        // Bus affinity: a module is electrically unreachable unless the adapter
+        // is configured for the bus it sits on. Silence, exactly as on a truck.
+        if (module.bitrateBps != selectedBitrate) return null
 
         val service = request.u8(0)
 
@@ -427,6 +465,9 @@ class SimulatedVehicleTransport(
         byteArrayOf(0x7F, service.toByte(), nrc.toByte())
 
     companion object {
+        private const val HIGH_SPEED_BPS = 500_000
+        private const val MEDIUM_SPEED_BPS = 125_000
+
         /** Appends a two's complement checksum, matching one of the candidates. */
         private fun withTwosComplement(data: ByteArray): ByteArray {
             val sum = data.fold(0) { acc, b -> acc + (b.toInt() and 0xFF) }

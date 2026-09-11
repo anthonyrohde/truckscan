@@ -1,6 +1,8 @@
 package com.anthonyrohde.f250scan.core.session
 
 import com.anthonyrohde.f250scan.core.ford.VehicleProfiles
+import com.anthonyrohde.f250scan.core.adapter.BusRouter
+import com.anthonyrohde.f250scan.core.adapter.CanBus
 import com.anthonyrohde.f250scan.core.isotp.IsoTpChannel
 import com.anthonyrohde.f250scan.core.pid.Pid
 import com.anthonyrohde.f250scan.core.pid.PidCatalog
@@ -37,6 +39,7 @@ data class LiveDataSample(
  */
 class LiveDataPoller(
     private val channel: IsoTpChannel,
+    private val busRouter: BusRouter? = null,
     private val logger: ((String) -> Unit)? = null,
 ) {
     /**
@@ -46,6 +49,7 @@ class LiveDataPoller(
      * is both faster and avoids filling the log with no-data results.
      */
     suspend fun readSupportedPids(): Set<Int> {
+        runCatching { busRouter?.ensureBus(CanBus.HS_CAN1) }
         val supported = mutableSetOf<Int>()
         for (base in listOf(0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0)) {
             val payload = requestPid(base) ?: break
@@ -69,6 +73,9 @@ class LiveDataPoller(
 
     /** Reads [pids] once. */
     suspend fun sampleOnce(pids: List<Pid>): LiveDataSample {
+        // Legislated OBD-II is answered by the powertrain on HS-CAN1, so a
+        // sample taken after reading a body module has to come back here first.
+        runCatching { busRouter?.ensureBus(CanBus.HS_CAN1) }
         val values = linkedMapOf<Int, PidValue>()
         val failed = mutableSetOf<Int>()
 

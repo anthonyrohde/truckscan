@@ -1,6 +1,7 @@
 package com.anthonyrohde.f250scan.core.session
 
 import com.anthonyrohde.f250scan.core.ford.AsBuiltBlock
+import com.anthonyrohde.f250scan.core.adapter.BusRouter
 import com.anthonyrohde.f250scan.core.ford.AsBuiltSnapshot
 import com.anthonyrohde.f250scan.core.ford.SecurityAccessManager
 import com.anthonyrohde.f250scan.core.ford.SecurityAccessResult
@@ -124,6 +125,7 @@ sealed class WriteOutcome {
 class AsBuiltWriter(
     private val channel: IsoTpChannel,
     private val securityAccess: SecurityAccessManager = SecurityAccessManager(),
+    private val busRouter: BusRouter? = null,
     private val logger: ((String) -> Unit)? = null,
 ) {
     /**
@@ -169,6 +171,16 @@ class AsBuiltWriter(
         val strategy = snapshot.checksumStrategy!!
 
         val effective = changes.filterNot { it.isNoOp }
+
+        // Never start a write sequence on the wrong bus: a mid-write timeout is
+        // the worst possible moment to discover the module was unreachable.
+        try {
+            busRouter?.ensureBus(module.bus)
+        } catch (e: Exception) {
+            return WriteOutcome.Blocked(
+                WriteBlocker.SessionRefused(e.message ?: "bus unavailable"),
+            )
+        }
         val client = clientFor(module)
 
         // --- Programming session
@@ -291,6 +303,13 @@ class AsBuiltWriter(
             )
         }
 
+        try {
+            busRouter?.ensureBus(module.bus)
+        } catch (e: Exception) {
+            return WriteOutcome.Blocked(
+                WriteBlocker.SessionRefused(e.message ?: "bus unavailable"),
+            )
+        }
         val client = clientFor(module)
         runCatching { client.startSession(DiagnosticSession.EXTENDED) }
         securityAccess.requestAccess(client, securityLevel)

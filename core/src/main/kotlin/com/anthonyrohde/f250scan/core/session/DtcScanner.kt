@@ -1,6 +1,7 @@
 package com.anthonyrohde.f250scan.core.session
 
 import com.anthonyrohde.f250scan.core.dtc.Dtc
+import com.anthonyrohde.f250scan.core.adapter.BusRouter
 import com.anthonyrohde.f250scan.core.isotp.IsoTpChannel
 import com.anthonyrohde.f250scan.core.uds.UdsClient
 import com.anthonyrohde.f250scan.core.uds.UdsNegativeResponseException
@@ -62,9 +63,18 @@ data class VehicleDtcScan(
  */
 class DtcScanner(
     private val channel: IsoTpChannel,
+    private val busRouter: BusRouter? = null,
     private val logger: ((String) -> Unit)? = null,
 ) {
     suspend fun readModule(module: DiscoveredModule): ModuleDtcResult {
+        // A whole-vehicle scan walks modules across several buses, so the
+        // adapter has to follow the module rather than stay where discovery
+        // left it.
+        try {
+            busRouter?.ensureBus(module.bus)
+        } catch (e: Exception) {
+            return ModuleDtcResult(module, emptyList(), e.message ?: "Bus unavailable")
+        }
         val client = clientFor(module)
 
         // Preferred path: UDS, which gives us status bytes and failure types.
@@ -110,6 +120,7 @@ class DtcScanner(
     /** Freeze-frame data captured when [dtc] set, if the module stored any. */
     suspend fun readSnapshot(module: DiscoveredModule, dtc: Dtc): ByteArray? {
         if (dtc.rawBytes.size < 3) return null
+        runCatching { busRouter?.ensureBus(module.bus) }.onFailure { return null }
         return runCatching {
             clientFor(module).readDtcSnapshot(dtc.rawBytes.copyOfRange(0, 3))
         }.getOrNull()
@@ -123,6 +134,7 @@ class DtcScanner(
      * diagnose. The UI confirms before reaching this.
      */
     suspend fun clearModule(module: DiscoveredModule): Result<Unit> = runCatching {
+        busRouter?.ensureBus(module.bus)
         clientFor(module).clearDiagnosticInformation()
         logger?.invoke("Cleared faults in ${module.module.code}")
         Unit

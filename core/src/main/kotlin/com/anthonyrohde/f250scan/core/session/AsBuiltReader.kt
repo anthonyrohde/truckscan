@@ -1,6 +1,7 @@
 package com.anthonyrohde.f250scan.core.session
 
 import com.anthonyrohde.f250scan.core.ford.AsBuiltBlock
+import com.anthonyrohde.f250scan.core.adapter.BusRouter
 import com.anthonyrohde.f250scan.core.ford.AsBuiltDidMap
 import com.anthonyrohde.f250scan.core.ford.AsBuiltSnapshot
 import com.anthonyrohde.f250scan.core.ford.ChecksumStrategy
@@ -38,6 +39,7 @@ data class AsBuiltScanProgress(
  */
 class AsBuiltReader(
     private val channel: IsoTpChannel,
+    private val busRouter: BusRouter? = null,
     private val logger: ((String) -> Unit)? = null,
 ) {
     /**
@@ -53,6 +55,7 @@ class AsBuiltReader(
         timeoutMillis: Long = 300,
         onProgress: ((AsBuiltScanProgress) -> Unit)? = null,
     ): Map<Int, ByteArray> {
+        busRouter?.ensureBus(module.bus)
         val client = clientFor(module)
         // An extended session is needed before many modules will discuss
         // configuration data at all. A refusal here is not fatal: some modules
@@ -136,6 +139,7 @@ class AsBuiltReader(
         learned: LearnedModule,
         onProgress: ((AsBuiltScanProgress) -> Unit)? = null,
     ): AsBuiltSnapshot {
+        busRouter?.ensureBus(module.bus)
         val client = clientFor(module)
         runCatching { client.startSession(DiagnosticSession.EXTENDED) }
 
@@ -168,6 +172,7 @@ class AsBuiltReader(
 
     /** Reads one identifier and presents it as a block. */
     suspend fun readBlock(module: DiscoveredModule, did: Int): AsBuiltBlock? {
+        busRouter?.ensureBus(module.bus)
         val data = clientFor(module).tryReadDataByIdentifier(did, 1_000) ?: return null
         return AsBuiltBlock(
             moduleAddress = module.module.requestId,

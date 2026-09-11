@@ -1,6 +1,7 @@
 package com.anthonyrohde.f250scan.core.session
 
 import com.anthonyrohde.f250scan.core.adapter.AdapterIdentity
+import com.anthonyrohde.f250scan.core.adapter.BusRouter
 import com.anthonyrohde.f250scan.core.adapter.CanBus
 import com.anthonyrohde.f250scan.core.adapter.ElmAdapter
 import com.anthonyrohde.f250scan.core.ford.SecurityAccessManager
@@ -41,11 +42,19 @@ class DiagnosticEngine(
     val adapter = ElmAdapter(transport, logger)
     val channel = IsoTpChannel(adapter, isoTpConfig, logger)
 
+    /**
+     * Keeps the adapter on the bus each module actually sits on.
+     *
+     * Shared by every feature object, because a module is unreachable unless
+     * its bus is selected and callers address modules across buses freely.
+     */
+    val busRouter = BusRouter(adapter, logger)
+
     val discovery = ModuleDiscovery(adapter, channel, logger)
-    val dtcScanner = DtcScanner(channel, logger)
-    val liveData = LiveDataPoller(channel, logger)
-    val asBuiltReader = AsBuiltReader(channel, logger)
-    val routines = ServiceRoutineRunner(channel, logger)
+    val dtcScanner = DtcScanner(channel, busRouter, logger)
+    val liveData = LiveDataPoller(channel, busRouter, logger)
+    val asBuiltReader = AsBuiltReader(channel, busRouter, logger)
+    val routines = ServiceRoutineRunner(channel, busRouter, logger)
 
     /**
      * Security access is injected so a derivation worked out later can be
@@ -54,10 +63,11 @@ class DiagnosticEngine(
     var securityAccessManager: SecurityAccessManager = SecurityAccessManager(logger = logger)
         set(value) {
             field = value
-            asBuiltWriter = AsBuiltWriter(channel, value, logger)
+            asBuiltWriter = AsBuiltWriter(channel, value, busRouter, logger)
         }
 
-    var asBuiltWriter: AsBuiltWriter = AsBuiltWriter(channel, securityAccessManager, logger)
+    var asBuiltWriter: AsBuiltWriter =
+        AsBuiltWriter(channel, securityAccessManager, busRouter, logger)
         private set
 
     /**
@@ -127,6 +137,7 @@ class DiagnosticEngine(
     }
 
     suspend fun disconnect() {
+        busRouter.reset()
         runCatching { adapter.disconnect() }
         _discoveredModules.value = emptyList()
         _connectionState.value = ConnectionState.Disconnected

@@ -1,6 +1,7 @@
 package com.anthonyrohde.f250scan.core.session
 
 import com.anthonyrohde.f250scan.core.isotp.IsoTpChannel
+import com.anthonyrohde.f250scan.core.adapter.BusRouter
 import com.anthonyrohde.f250scan.core.uds.DiagnosticSession
 import com.anthonyrohde.f250scan.core.uds.ResetType
 import com.anthonyrohde.f250scan.core.uds.RoutineControlType
@@ -76,6 +77,7 @@ sealed class RoutineResult {
  */
 class ServiceRoutineRunner(
     private val channel: IsoTpChannel,
+    private val busRouter: BusRouter? = null,
     private val logger: ((String) -> Unit)? = null,
 ) {
     /**
@@ -147,6 +149,7 @@ class ServiceRoutineRunner(
     ): RoutineResult {
         val client = clientFor(module)
         return try {
+            busRouter?.ensureBus(module.bus)
             runCatching { client.startSession(DiagnosticSession.EXTENDED) }
 
             when (routine.id) {
@@ -206,6 +209,7 @@ class ServiceRoutineRunner(
         val client = clientFor(module)
 
         return try {
+            busRouter?.ensureBus(module.bus)
             client.startSession(DiagnosticSession.EXTENDED)
             securityAccess?.requestAccess(client)
 
@@ -245,6 +249,7 @@ class ServiceRoutineRunner(
 
     /** Attempts to stop a running routine. */
     suspend fun stopCustom(module: DiscoveredModule, routineId: Int): RoutineResult = try {
+        busRouter?.ensureBus(module.bus)
         val response = clientFor(module)
             .routineControl(RoutineControlType.STOP, routineId)
         RoutineResult.Completed(response, "Stop requested.")

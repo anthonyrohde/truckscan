@@ -62,6 +62,16 @@ class ElmAdapter(
 
     private var identity: AdapterIdentity = AdapterIdentity("")
     private var currentBus: CanBus? = null
+
+    /**
+     * Initialisation sequences already proven to work for a bus.
+     *
+     * Bringing a bus up the first time means trying candidate sequences and
+     * listening for traffic, which costs a few hundred milliseconds. Returning
+     * to a bus we have already brought up should not pay that again, and with
+     * per-module bus routing we return to buses constantly.
+     */
+    private val provenSequences = mutableMapOf<CanBus, BusInit.Sequence>()
     private var extendedAddressing: Boolean = false
     private var txHeader: Int? = null
     private var rxFilter: Int? = null
@@ -136,6 +146,7 @@ class ElmAdapter(
     }
 
     suspend fun disconnect() = mutex.withLock {
+        provenSequences.clear()
         currentBus = null
         txHeader = null
         rxFilter = null
@@ -156,6 +167,16 @@ class ElmAdapter(
     suspend fun selectBus(bus: CanBus): BusSelection = mutex.withLock {
         if (bus != CanBus.HS_CAN1 && !identity.supportsMultiBus) {
             throw AdapterException(identity.multiBusLimitationMessage(bus))
+        }
+
+        // Fast path: we have already established what works for this bus.
+        provenSequences[bus]?.let { proven ->
+            proven.commands.forEach { rawCommand(it) }
+            currentBus = bus
+            extendedAddressing = bus.extendedAddressing
+            txHeader = null
+            rxFilter = null
+            return@withLock BusSelection(bus, proven.label, trafficObserved = true)
         }
 
         val candidates = BusInit.candidatesFor(bus, identity)
@@ -187,6 +208,7 @@ class ElmAdapter(
 
             if (probeBusTraffic()) {
                 log("Bus ${bus.displayName} up via '${sequence.label}' - traffic seen")
+                provenSequences[bus] = sequence
                 return@withLock BusSelection(bus, sequence.label, trafficObserved = true)
             }
             log("Bus init '${sequence.label}' applied but bus is silent")

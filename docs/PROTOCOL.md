@@ -79,6 +79,29 @@ is used as probe candidates and naming hints, never as a declaration of vehicle
 content. The truck is the authority. An address that answers and is not in the
 table is reported as an unrecognised module rather than ignored.
 
+## Bus routing
+
+A module is unreachable unless the adapter is configured for the bus it sits on.
+Discovery selects each bus as it sweeps, but everything afterwards - fault
+reads, configuration reads, routines - addresses modules in whatever order the
+caller likes, freely crossing buses.
+
+So every module-facing operation calls `BusRouter.ensureBus(module.bus)` first.
+This is not an optimisation; without it those operations run on whichever bus
+happened to be selected last and time out against anything else. The failure
+mode is quiet, which is what makes it dangerous: a timeout reads as "module not
+present", so a body module silently appears to have no faults rather than
+reporting an error.
+
+The simulator models bus affinity for exactly this reason - its powertrain
+modules answer only at 500 kbps and its body modules only at 125 kbps - so the
+test suite catches a missing switch instead of passing regardless.
+
+Routing is cheap. A request for the currently selected bus is a no-op, and the
+adapter remembers the initialisation sequence proven to work for each bus, so
+returning to one skips the candidate probing and traffic check it needed the
+first time.
+
 ## DTC decoding
 
 Two-byte code plus, under UDS, a third failure-type byte and a status byte.

@@ -44,12 +44,19 @@ Two of its published specifications matter to how this app is written:
 assuming one, so the EX is not throttled to the 115,200 that suits a cheaper
 bridge.
 
-Note that `ElmAdapter.selectBus` still configures **one bus at a time**. That is
-correct for every adapter and is all a toggle-switch device can do, but it does
-not exploit the EX's simultaneous access: scanning across HS-CAN1 and MS-CAN
-reconfigures between them rather than interleaving. Reconfiguration is fast and
-software-driven on this hardware, so the cost is modest, but there is real
-headroom here for a quicker whole-vehicle scan.
+`BusRouter` keeps the adapter on the bus each module actually sits on, since a
+module is unreachable unless its bus is selected and callers address modules
+across buses freely. Returning to a bus is cheap: `ElmAdapter` remembers the
+initialisation sequence proven to work for it, so the candidate probing is paid
+once per bus per session, and a request for the bus already selected is a no-op.
+
+`BusRouter.simultaneousBusAccess` is the seam for the EX's ability to hold both
+buses at once. It is **off by default**, and deliberately so: the ST command set
+needed to put the adapter into that mode is not something this project has been
+able to verify, and assuming it would silently address modules on a bus that was
+never brought up. Sequential switching is correct on every adapter and merely
+leaves some speed on the table. Turning the flag on is a one-line change once
+the behaviour is confirmed on real hardware.
 
 **OBDLink MX+ (Bluetooth Classic).** The best wireless option, and also
 recommended by the FORScan team. Classic SPP gives a plain byte stream with far
