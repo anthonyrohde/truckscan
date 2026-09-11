@@ -34,10 +34,21 @@ class UsbSerialTransport(
     private var port: UsbSerialPort? = null
     private val readBuffer = ByteArray(4096)
 
+    /** Line rate actually accepted by the driver. Surfaced for the log. */
+    var negotiatedBaudRate: Int = 0
+        private set
+
     override val isOpen: Boolean get() = port?.isOpen == true
 
     override val description: String
-        get() = driver.device.productName ?: "USB adapter ${driver.device.deviceId}"
+        get() {
+            val name = driver.device.productName ?: "USB adapter ${driver.device.deviceId}"
+            return if (negotiatedBaudRate > 0) {
+                "$name @ ${negotiatedBaudRate / 1000} kbaud"
+            } else {
+                name
+            }
+        }
 
     override suspend fun open() = withContext(dispatcher) {
         if (isOpen) return@withContext
@@ -56,14 +67,7 @@ class UsbSerialTransport(
         try {
             val serialPort = driver.ports.first()
             serialPort.open(connection)
-            // 115200 8N1 is what the STN adapters present over USB. The ELM327
-            // baud setting is irrelevant here: this is a virtual COM port.
-            serialPort.setParameters(
-                BAUD_RATE,
-                8,
-                UsbSerialPort.STOPBITS_1,
-                UsbSerialPort.PARITY_NONE,
-            )
+            negotiatedBaudRate = negotiateBaudRate(serialPort)
             serialPort.dtr = true
             serialPort.rts = true
             port = serialPort
@@ -98,8 +102,47 @@ class UsbSerialTransport(
         port = null
     }
 
+    /**
+     * Picks the fastest line rate the driver will accept.
+     *
+     * The OBDLink EX advertises 2,000 kbit/s, so the 115,200 this used to
+     * hardcode left most of the link on the table. Rather than swap one guess
+     * for another, this tries the candidates highest first and keeps the first
+     * that is accepted.
+     *
+     * Two things make that safe. On a CDC virtual COM port the rate is
+     * negotiated by USB itself and the setting is effectively advisory, so a
+     * high value costs nothing. On a real UART bridge an unsupported rate is
+     * rejected outright, and we fall through to the next candidate. Either way
+     * 115,200 remains the floor, which is the rate every adapter accepts.
+     */
+    private fun negotiateBaudRate(serialPort: UsbSerialPort): Int {
+        for (candidate in BAUD_CANDIDATES) {
+            val accepted = runCatching {
+                serialPort.setParameters(
+                    candidate,
+                    DATA_BITS,
+                    UsbSerialPort.STOPBITS_1,
+                    UsbSerialPort.PARITY_NONE,
+                )
+            }.isSuccess
+            if (accepted) return candidate
+        }
+        // Nothing was accepted; report the floor and let the first read or
+        // write surface the real problem with a useful message.
+        return BAUD_CANDIDATES.last()
+    }
+
     companion object {
-        private const val BAUD_RATE = 115_200
+        /**
+         * Line rates to try, fastest first.
+         *
+         * 2 Mbit/s is what the OBDLink EX advertises; the intermediate steps
+         * cover bridges that cap lower, and 115,200 is the universal floor.
+         */
+        private val BAUD_CANDIDATES = listOf(2_000_000, 1_000_000, 500_000, 115_200)
+
+        private const val DATA_BITS = 8
         private const val WRITE_TIMEOUT_MS = 2_000
 
         private const val ACTION_USB_PERMISSION = "com.anthonyrohde.f250scan.USB_PERMISSION"
