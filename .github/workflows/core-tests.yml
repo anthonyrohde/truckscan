@@ -1,0 +1,32 @@
+name: Core protocol tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # No Android SDK needed: :core is pure Kotlin/JVM and settings.gradle.kts
+      # skips :app when no SDK is present. This is the whole reason for the
+      # module split - the protocol logic is verifiable in CI on its own.
+      - name: Run core protocol tests
+        run: ./gradlew :core:test --no-daemon
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-test-report
+          path: core/build/reports/tests/test

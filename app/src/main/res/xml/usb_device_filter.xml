@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- FTDI, used by several STN-based wired adapters. -->
+    <usb-device vendor-id="1027" />
+    <!-- Prolific. -->
+    <usb-device vendor-id="1659" />
+    <!-- Silicon Labs CP210x. -->
+    <usb-device vendor-id="4292" />
+    <!-- STMicroelectronics CDC, used by the OBDLink EX. -->
+    <usb-device vendor-id="1155" />
+</resources>
