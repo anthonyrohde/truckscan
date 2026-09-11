@@ -1,7 +1,10 @@
 plugins {
+    // AGP is used only here, so it carries its own version. The Kotlin plugin
+    // versions come from the root project, which is what stops Gradle loading
+    // the Kotlin plugin once per module.
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.kotlin.compose)
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {

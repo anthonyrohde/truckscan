@@ -290,17 +290,21 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             _activeSnapshot.value = snapshot
             refreshSnapshots()
 
+            // Bound to a local: Kotlin will not smart-cast a public property
+            // declared in another module, since nothing stops it changing
+            // between the null check and the use.
+            val strategy = snapshot.checksumStrategy
             _message.value = buildString {
                 append("Saved ${snapshot.blocks.size} block(s) from ")
                 append("${module.module.code} to ${file.name}. ")
-                if (snapshot.checksumStrategy == null) {
+                if (strategy == null) {
                     append(
                         "The checksum algorithm could not be determined from these " +
                             "blocks, so writes will be refused - the backup itself is " +
                             "still valid.",
                     )
                 } else {
-                    append("Checksum: ${snapshot.checksumStrategy.label}.")
+                    append("Checksum: ${strategy.label}.")
                 }
             }
         } catch (e: Exception) {
