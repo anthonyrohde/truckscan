@@ -101,6 +101,11 @@ bytes are invented. It will not tell you anything about your own truck.
   Record faults first.
 - Keep your backups off the phone. They are plain text files for exactly that
   reason.
+
+The app is not affiliated with Ford or with FORScan, and nothing about a 2022
+Super Duty's modules is documented by Ford for this purpose. It is offered
+under the MIT licence, which means without warranty of any kind - what you do
+with your own vehicle is your own decision. See [LICENSE](LICENSE).
 - Nothing in the app writes to a module. The one operation that changes vehicle
   state is clearing faults, and it is the one the app asks you to confirm.
 
