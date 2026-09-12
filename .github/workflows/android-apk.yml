@@ -52,14 +52,20 @@ jobs:
 
       # A rolling prerelease at a fixed tag, so the download URL never changes
       # and can be bookmarked on the phone.
+      #
+      # The tag is project-scoped rather than a generic "debug-latest". This
+      # repository holds several unrelated projects, and a shared tag means
+      # whichever one builds last silently replaces the other's APK - which
+      # already happened once: the first run uploaded into a debug-latest
+      # release another branch had created.
       - name: Publish to the rolling debug release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view debug-latest >/dev/null 2>&1 || \
-            gh release create debug-latest \
+          gh release view f250scan-debug >/dev/null 2>&1 || \
+            gh release create f250scan-debug \
               --prerelease \
-              --title "Latest debug build" \
-              --notes "Debug APK built automatically from the latest commit on this branch. Unsigned debug build - Android will warn about installing from an unknown source."
-          gh release upload debug-latest \
+              --title "SuperDuty Scan - latest debug build" \
+              --notes "Debug APK for the F-250 OBD-II diagnostic app, built automatically from the latest commit. Unsigned debug build, so Android will warn about an unknown source."
+          gh release upload f250scan-debug \
             app/build/outputs/apk/debug/app-debug.apk --clobber
