@@ -3,11 +3,8 @@ package com.anthonyrohde.truckscan.core
 import com.anthonyrohde.truckscan.core.adapter.CanBus
 import com.anthonyrohde.truckscan.core.ford.ChecksumStrategy
 import com.anthonyrohde.truckscan.core.pid.PidCatalog
-import com.anthonyrohde.truckscan.core.session.BlockChange
 import com.anthonyrohde.truckscan.core.session.ConnectionState
 import com.anthonyrohde.truckscan.core.session.DiagnosticEngine
-import com.anthonyrohde.truckscan.core.session.WriteBlocker
-import com.anthonyrohde.truckscan.core.session.WriteOutcome
 import com.anthonyrohde.truckscan.core.transport.SimulatedVehicleTransport
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -290,99 +287,6 @@ class EndToEndTest {
         assertEquals("1FT8W2BT7NEC12345", snapshot.vin)
     }
 
-    // ------------------------------------------------------- As-Built write path
-
-    @Test
-    fun `write is refused without a backup`() = runBlocking {
-        val engine = engine()
-        engine.connect()
-        val bcm = engine.quickScanVehicle().first { it.module.code == "BCM" }
-
-        val outcome = engine.asBuiltWriter.write(bcm, backup = null, changes = emptyList())
-
-        val blocked = assertInstanceOf(WriteOutcome.Blocked::class.java, outcome)
-        assertInstanceOf(WriteBlocker.NoBackup::class.java, blocked.blocker)
-    }
-
-    @Test
-    fun `write is refused when supply voltage is too low`() = runBlocking {
-        val engine = engine()
-        engine.connect()
-        val bcm = engine.quickScanVehicle().first { it.module.code == "BCM" }
-        val snapshot = engine.asBuiltReader.snapshot(bcm, ranges = listOf(0xDE00..0xDE0F))
-
-        val change = changeFirstByte(snapshot)
-        val outcome = engine.asBuiltWriter.write(
-            bcm, snapshot, listOf(change), measuredVoltage = 11.4,
-        )
-
-        val blocked = assertInstanceOf(WriteOutcome.Blocked::class.java, outcome)
-        val lowVoltage = assertInstanceOf(WriteBlocker.LowVoltage::class.java, blocked.blocker)
-        assertTrue(lowVoltage.explanation.contains("11.40 V"), lowVoltage.explanation)
-        assertTrue(lowVoltage.explanation.contains("charger"))
-    }
-
-    @Test
-    fun `write is refused when nothing actually changed`() = runBlocking {
-        val engine = engine()
-        engine.connect()
-        val bcm = engine.quickScanVehicle().first { it.module.code == "BCM" }
-        val snapshot = engine.asBuiltReader.snapshot(bcm, ranges = listOf(0xDE00..0xDE0F))
-
-        val noOp = BlockChange(
-            did = snapshot.sourceDids.first(),
-            before = snapshot.blocks.first(),
-            after = snapshot.blocks.first(),
-        )
-        val outcome = engine.asBuiltWriter.write(bcm, snapshot, listOf(noOp), 14.0)
-
-        val blocked = assertInstanceOf(WriteOutcome.Blocked::class.java, outcome)
-        assertInstanceOf(WriteBlocker.NothingToDo::class.java, blocked.blocker)
-    }
-
-    @Test
-    fun `write stops at security access and says why, leaving the module untouched`() = runBlocking {
-        val engine = engine()
-        engine.connect()
-        val bcm = engine.quickScanVehicle().first { it.module.code == "BCM" }
-        val snapshot = engine.asBuiltReader.snapshot(bcm, ranges = listOf(0xDE00..0xDE0F))
-
-        val outcome = engine.asBuiltWriter.write(
-            bcm, snapshot, listOf(changeFirstByte(snapshot)), measuredVoltage = 14.0,
-        )
-
-        // This is the realistic outcome on a current Ford: the module issues a
-        // seed and refuses every key we can compute.
-        val blocked = assertInstanceOf(WriteOutcome.Blocked::class.java, outcome)
-        val denied = assertInstanceOf(WriteBlocker.SecurityDenied::class.java, blocked.blocker)
-        assertTrue(
-            denied.explanation.contains("not known to this app") ||
-                denied.explanation.contains("Ford proprietary"),
-            "must explain the limitation honestly: ${denied.explanation}",
-        )
-
-        // And critically: the module's configuration is unchanged.
-        val after = engine.asBuiltReader.snapshot(bcm, ranges = listOf(0xDE00..0xDE0F))
-        assertEquals(
-            snapshot.blocks, after.blocks,
-            "a blocked write must not have modified the module",
-        )
-    }
-
-    @Test
-    fun `block change describes the exact bytes that differ`() = runBlocking {
-        val engine = engine()
-        engine.connect()
-        val bcm = engine.quickScanVehicle().first { it.module.code == "BCM" }
-        val snapshot = engine.asBuiltReader.snapshot(bcm, ranges = listOf(0xDE00..0xDE0F))
-
-        val description = changeFirstByte(snapshot).describe()
-
-        assertTrue(description.contains("before:"), description)
-        assertTrue(description.contains("after:"), description)
-        assertTrue(description.contains("changed byte(s): 0"), description)
-    }
-
     // ---------------------------------------------------------- service routines
 
     @Test
@@ -514,16 +418,4 @@ class EndToEndTest {
 
     // ------------------------------------------------------------------ helpers
 
-    /** Produces a change that flips one byte of the first configuration block. */
-    private fun changeFirstByte(
-        snapshot: com.anthonyrohde.truckscan.core.ford.AsBuiltSnapshot,
-    ): BlockChange {
-        val before = snapshot.blocks.first()
-        val edited = before.data.copyOf().also { it[0] = (it[0] + 1).toByte() }
-        return BlockChange(
-            did = snapshot.sourceDids.first { it >= 0xDE00 },
-            before = before,
-            after = before.copy(data = edited),
-        )
-    }
 }

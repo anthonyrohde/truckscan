@@ -15,15 +15,14 @@ identification (part numbers, calibration levels, VIN), and As-Built
 configuration blocks. All of it is implemented, and the protocol layers have
 94 passing tests behind them.
 
-**Writing is implemented but will probably be refused.** As-Built writes go
-through a full safety sequence - mandatory backup, checksum verification,
-voltage check, programming session, security access, write, read-back verify,
-automatic restore on failure. The step that stops you is security access: UDS
-service 0x27 requires a key derived from a module-issued seed, and for a 2022
-module that derivation is Ford proprietary. The dealer tool completes the
-handshake against Ford's servers. There is no local substitute, and no amount of
-code here invents one. When this happens the app says so plainly rather than
-failing mysteriously. See [docs/AS_BUILT.md](docs/AS_BUILT.md).
+**As-Built is read-only, deliberately.** The app reads a module's configuration,
+shows it in Ford's own notation, and saves it as a portable text backup. It does
+not write. Writing is gated behind UDS security access, whose key derivation is
+Ford proprietary - for a 2022 module no locally computed key is accepted, and
+the dealer tool completes that handshake against Ford's servers. The write path
+was built and then removed: a button that always fails at the same wall is worse
+than no button, because it implies a capability that is not there. Make changes
+in FORScan, and take a backup here first. See [docs/AS_BUILT.md](docs/AS_BUILT.md).
 
 **Ford-specific service routines are not included, on purpose.** Injector cutout
 tests, forced DPF regeneration, KAM reset and so on are invoked through

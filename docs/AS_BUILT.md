@@ -1,5 +1,17 @@
 # As-Built configuration
 
+> **This app reads As-Built. It does not write it.**
+>
+> Writing is gated behind UDS security access, whose key derivation is Ford
+> proprietary; on a 2022 vehicle no locally computed key is accepted. A write
+> button that always fails at the same wall is worse than no button - it implies
+> a capability that is not there and invites someone to go hunting for a way
+> round it. Make changes in FORScan; take a backup here first.
+>
+> The sections below on the write sequence and security access are kept because
+> they explain *why* the limit exists, and because the reading side depends on
+> the same format and checksum work.
+
 ## What it is
 
 Every Ford module holds a block of configuration bytes describing how that
@@ -68,9 +80,13 @@ after too many attempts NRC 0x36 plus a lockout until the ignition is cycled.
 `SecurityAccessManager` counts attempts and stops at two rather than
 brute-forcing you into that state.
 
-## The write sequence
+## The write sequence, and why it is not here
 
-Every write goes through this, and any failure stops it:
+This is what a safe write would require. It was implemented, then removed: the
+sequence is sound but it can never get past step 4 on this vehicle, and shipping
+a path that always dead-ends is a way of implying otherwise.
+
+Every write would go through this, and any failure stops it:
 
 1. **A backup must already exist and be restorable.** Not optional. A snapshot
    held only in memory is not a backup.

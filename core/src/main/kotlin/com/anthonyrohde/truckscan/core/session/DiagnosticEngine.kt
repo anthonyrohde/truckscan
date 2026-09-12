@@ -57,18 +57,10 @@ class DiagnosticEngine(
     val routines = ServiceRoutineRunner(channel, busRouter, logger)
 
     /**
-     * Security access is injected so a derivation worked out later can be
-     * dropped in without touching the writer.
+     * Security access, used by service routines that require an authenticated
+     * session. Injected so a derivation worked out later can be dropped in.
      */
     var securityAccessManager: SecurityAccessManager = SecurityAccessManager(logger = logger)
-        set(value) {
-            field = value
-            asBuiltWriter = AsBuiltWriter(channel, value, busRouter, logger)
-        }
-
-    var asBuiltWriter: AsBuiltWriter =
-        AsBuiltWriter(channel, securityAccessManager, busRouter, logger)
-        private set
 
     /**
      * Facts learned from an imported bus capture, if one has been loaded.

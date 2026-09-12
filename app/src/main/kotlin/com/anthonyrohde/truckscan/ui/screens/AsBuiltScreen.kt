@@ -10,21 +10,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -32,11 +28,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.anthonyrohde.truckscan.ScanViewModel
-import com.anthonyrohde.truckscan.core.ford.AsBuiltBlock
-import com.anthonyrohde.truckscan.core.session.BlockChange
 import com.anthonyrohde.truckscan.core.util.Hex
-import kotlinx.coroutines.launch
 
+/**
+ * As-Built configuration, read-only.
+ *
+ * The app reads a module's configuration, shows it in Ford's own notation and
+ * saves it as a portable backup. It does not write.
+ *
+ * That is a deliberate limit, not an unfinished one. Writing to a module is
+ * gated behind UDS security access, whose key derivation is Ford proprietary;
+ * on a 2022 vehicle no locally computed key will be accepted. A write button
+ * that always fails at the same wall is worse than no button, because it
+ * implies the capability exists and invites someone to go looking for a way
+ * round it. Use FORScan for changes - and take a backup here first.
+ */
 @Composable
 fun AsBuiltScreen(viewModel: ScanViewModel) {
     val modules by viewModel.modules.collectAsStateWithLifecycle()
@@ -45,19 +51,9 @@ fun AsBuiltScreen(viewModel: ScanViewModel) {
     val busy by viewModel.busy.collectAsStateWithLifecycle()
 
     var menuOpen by remember { mutableStateOf(false) }
-    var editing by remember { mutableStateOf<Pair<Int, AsBuiltBlock>?>(null) }
-
-    editing?.let { (did, block) ->
-        EditBlockDialog(
-            did = did,
-            block = block,
-            viewModel = viewModel,
-            onDismiss = { editing = null },
-        )
-    }
 
     LazyColumn(Modifier.fillMaxSize()) {
-        item { SectionHeader("Module configuration (As-Built)") }
+        item { SectionHeader("As-Built") }
         item { BusyBanner(busy) }
 
         item {
@@ -68,19 +64,17 @@ fun AsBuiltScreen(viewModel: ScanViewModel) {
                 ),
             ) {
                 Column(Modifier.padding(12.dp)) {
-                    Text("Read this first", fontWeight = FontWeight.SemiBold)
+                    Text("Read and back up", fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "This app can read your modules' configuration bytes, back them " +
-                            "up, and write them back. It cannot tell you what the bytes " +
-                            "mean - that is Ford's proprietary data and it is not in " +
-                            "here. Get the factory As-Built for your VIN and work from " +
-                            "that.\n\n" +
-                            "Writes are gated behind a module's security access. On a " +
-                            "2022 truck the key derivation is not publicly known, so " +
-                            "expect writes to be refused with an explanation. Reading " +
-                            "and backing up work regardless, and are worth doing now " +
-                            "rather than after something goes wrong.",
+                        "This reads a module's configuration bytes and saves them as a " +
+                            "Ford-format text file you can copy off the phone. It does " +
+                            "not write.\n\n" +
+                            "Writing is gated behind the module's security access, and " +
+                            "the key derivation for a 2022 vehicle is Ford's - no locally " +
+                            "computed key will be accepted. Make changes in FORScan, and " +
+                            "take a backup here before you do. A backup is only worth " +
+                            "having if it exists before the change, not after.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -90,8 +84,17 @@ fun AsBuiltScreen(viewModel: ScanViewModel) {
         item { SectionHeader("Back up a module") }
         item {
             Column(Modifier.padding(horizontal = 16.dp)) {
-                OutlinedButton(onClick = { menuOpen = true }) {
-                    Text("Choose a module to read")
+                OutlinedButton(
+                    onClick = { menuOpen = true },
+                    enabled = modules.isNotEmpty(),
+                ) {
+                    Text(
+                        if (modules.isEmpty()) {
+                            "Scan for modules first"
+                        } else {
+                            "Choose a module to read"
+                        },
+                    )
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     modules.forEach { module ->
@@ -112,8 +115,8 @@ fun AsBuiltScreen(viewModel: ScanViewModel) {
             item {
                 EmptyState(
                     "No backups yet",
-                    "Read a module above. Backups are saved as Ford-format text files " +
-                        "you can share off the phone - which is the point of having them.",
+                    "Read a module above. Backups are plain text files - share them to " +
+                        "email or cloud storage so they survive this phone.",
                 )
             }
         }
@@ -154,8 +157,9 @@ fun AsBuiltScreen(viewModel: ScanViewModel) {
                     if (snapshot.checksumStrategy == null) {
                         Explanation(
                             "No candidate algorithm reproduces this module's existing " +
-                                "checksums, so a new one cannot be computed safely and " +
-                                "writes will be refused. The backup itself is still good.",
+                                "checksums. The backup is still a faithful copy of what " +
+                                "the module returned - the algorithm only matters when " +
+                                "writing, which this app does not do.",
                         )
                     }
                 }
@@ -171,24 +175,12 @@ fun AsBuiltScreen(viewModel: ScanViewModel) {
                             fontFamily = FontFamily.Monospace,
                             style = MaterialTheme.typography.bodyMedium,
                         )
-                        Spacer(Modifier.height(6.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                if (did >= 0) {
-                                    "DID ${Hex.encode(did, 4)}"
-                                } else {
-                                    "identifier unknown"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        if (did >= 0 && snapshot.checksumStrategy != null) {
-                            Spacer(Modifier.height(8.dp))
-                            OutlinedButton(onClick = { editing = did to block }) {
-                                Text("Edit and write")
-                            }
-                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            if (did >= 0) "DID ${Hex.encode(did, 4)}" else "identifier unknown",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
@@ -196,118 +188,4 @@ fun AsBuiltScreen(viewModel: ScanViewModel) {
 
         item { Spacer(Modifier.height(24.dp)) }
     }
-}
-
-/**
- * Edits one block's bytes and writes them.
- *
- * The dialog validates before offering to write, so a refusal (no backup, low
- * voltage, unknown checksum, security access) is explained before the user
- * commits rather than after.
- */
-@Composable
-private fun EditBlockDialog(
-    did: Int,
-    block: AsBuiltBlock,
-    viewModel: ScanViewModel,
-    onDismiss: () -> Unit,
-) {
-    val modules by viewModel.modules.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope()
-
-    var hex by remember { mutableStateOf(Hex.encode(block.data, " ")) }
-    var blocker by remember { mutableStateOf<String?>(null) }
-    var checked by remember { mutableStateOf(false) }
-
-    val parsed = Hex.decodeOrNull(hex)
-    val module = modules.firstOrNull { it.module.requestId == block.moduleAddress }
-
-    val change = parsed
-        ?.takeIf { it.size == block.data.size }
-        ?.let { BlockChange(did, block, block.copy(data = it)) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Edit block ${block.blockId}") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = hex,
-                    onValueChange = {
-                        hex = it
-                        checked = false
-                        blocker = null
-                    },
-                    label = { Text("Configuration bytes (hex)") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-
-                when {
-                    parsed == null ->
-                        Text(
-                            "Not valid hex.",
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    parsed.size != block.data.size ->
-                        Text(
-                            "This block is ${block.data.size} bytes; you have entered " +
-                                "${parsed.size}. The length must match exactly.",
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    change != null && change.isNoOp ->
-                        Text(
-                            "Unchanged.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    change != null ->
-                        Text(
-                            change.describe(),
-                            fontFamily = FontFamily.Monospace,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                }
-
-                blocker?.let {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        it,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "The checksum is recomputed automatically. The module is read back " +
-                        "after writing and the original restored if it does not match.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        confirmButton = {
-            if (!checked) {
-                TextButton(
-                    enabled = change != null && !change.isNoOp && module != null,
-                    onClick = {
-                        scope.launch {
-                            val target = module ?: return@launch
-                            val reason = viewModel.validateWrite(target, listOf(change!!))
-                            blocker = reason
-                            checked = reason == null
-                        }
-                    },
-                ) { Text("Check") }
-            } else {
-                TextButton(onClick = {
-                    module?.let { viewModel.writeAsBuilt(it, listOf(change!!)) }
-                    onDismiss()
-                }) { Text("Write to module") }
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }

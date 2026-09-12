@@ -9,7 +9,6 @@ import com.anthonyrohde.truckscan.core.pid.Pid
 import com.anthonyrohde.truckscan.core.pid.PidCatalog
 import com.anthonyrohde.truckscan.core.pid.PidValue
 import com.anthonyrohde.truckscan.core.pid.ZoneSeverity
-import com.anthonyrohde.truckscan.core.session.BlockChange
 import com.anthonyrohde.truckscan.core.session.ConnectionState
 import com.anthonyrohde.truckscan.core.session.DiagnosticEngine
 import com.anthonyrohde.truckscan.core.session.DiscoveredModule
@@ -17,7 +16,6 @@ import com.anthonyrohde.truckscan.core.session.LiveDataSample
 import com.anthonyrohde.truckscan.core.session.RoutineResult
 import com.anthonyrohde.truckscan.core.session.ServiceRoutine
 import com.anthonyrohde.truckscan.core.session.VehicleDtcScan
-import com.anthonyrohde.truckscan.core.session.WriteOutcome
 import com.anthonyrohde.truckscan.core.trace.LearnedProfile
 import com.anthonyrohde.truckscan.core.trace.TraceLogAnalyzer
 import com.anthonyrohde.truckscan.core.trace.TraceParseReport
@@ -349,140 +347,6 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteSnapshot(stored: StoredSnapshot) = viewModelScope.launch {
         snapshotStore.delete(stored.file)
         refreshSnapshots()
-    }
-
-    /** Validates without touching the vehicle, for the confirmation screen. */
-    suspend fun validateWrite(
-        module: DiscoveredModule,
-        changes: List<BlockChange>,
-    ): String? {
-        val active = engine ?: return "Not connected."
-        val backup = snapshotStore.latestFor(module.module.code)
-        val voltage = runCatching { active.readControlModuleVoltage() }.getOrNull()
-        return active.asBuiltWriter.validate(backup, changes, voltage)?.explanation
-    }
-
-    fun writeAsBuilt(
-        module: DiscoveredModule,
-        changes: List<BlockChange>,
-    ) = viewModelScope.launch {
-        val active = engine ?: return@launch
-        _busy.value = Busy.Working("Writing ${module.module.code}")
-        try {
-            val backup = snapshotStore.latestFor(module.module.code)
-            val voltage = runCatching { active.readControlModuleVoltage() }.getOrNull()
-
-            when (val outcome = active.asBuiltWriter.write(module, backup, changes, voltage)) {
-                is WriteOutcome.Success ->
-                    _message.value = "Wrote and verified ${outcome.written.size} block(s). " +
-                        "Cycle the ignition for the change to take effect."
-
-                is WriteOutcome.Blocked ->
-                    _message.value = outcome.blocker.explanation
-
-                is WriteOutcome.PartialFailure -> _message.value = buildString {
-                    append("Write failed at DID ")
-                    append(outcome.failedAt.did.toString(16).uppercase())
-                    append(": ${outcome.reason}. ")
-                    append(outcome.restoreDetail)
-                }
-
-                is WriteOutcome.VerificationFailed -> _message.value = buildString {
-                    append("The module accepted the write but read back something ")
-                    append("different, so it did not take. ")
-                    append(
-                        if (outcome.restored) {
-                            "The original value has been restored."
-                        } else {
-                            "The original value could NOT be restored - restore from " +
-                                "your backup file before driving."
-                        },
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            _message.value = e.message
-        } finally {
-            _busy.value = Busy.Idle
-        }
-    }
-
-    // ----------------------------------------------------------- trace importing
-
-    fun refreshProfiles() = viewModelScope.launch {
-        _profiles.value = profileStore.list()
-    }
-
-    /**
-     * Imports a bus capture and learns what it can from it.
-     *
-     * [text] is the raw log contents; [name] is shown so the user can tell
-     * profiles apart later. Nothing about the vehicle is touched - this is
-     * purely reading a file.
-     */
-    fun importTrace(text: String, name: String) = viewModelScope.launch {
-        _busy.value = Busy.Working("Analysing $name")
-        try {
-            val (profile, report) = TraceLogAnalyzer(log::append).analyseText(text, name)
-            _lastImportReport.value = report
-
-            if (report.isEmpty) {
-                _message.value = report.describe()
-                return@launch
-            }
-            if (profile.isEmpty) {
-                _message.value = "Read ${report.framesParsed} frame(s) from $name, but " +
-                    "found no configuration reads or writes to learn from. A capture of " +
-                    "a module configuration read is what this needs."
-                return@launch
-            }
-
-            val file = profileStore.save(profile)
-            profileStore.setActive(file)
-            _activeProfile.value = profile
-            applyProfileToEngine(profile)
-            refreshProfiles()
-
-            _message.value = "Learned from $name: " +
-                "${profile.modules.count { it.hasAnything }} module(s), saved as ${file.name}."
-        } catch (e: Exception) {
-            _message.value = "Could not analyse $name: ${e.message}"
-        } finally {
-            _busy.value = Busy.Idle
-        }
-    }
-
-    fun activateProfile(stored: StoredProfile) = viewModelScope.launch {
-        val profile = profileStore.load(stored.file)
-        if (profile == null) {
-            _message.value = "Could not read ${stored.file.name}."
-            return@launch
-        }
-        profileStore.setActive(stored.file)
-        _activeProfile.value = profile
-        applyProfileToEngine(profile)
-        _message.value = "Applied ${stored.file.name}."
-    }
-
-    fun clearActiveProfile() = viewModelScope.launch {
-        profileStore.setActive(null)
-        _activeProfile.value = null
-        applyProfileToEngine(null)
-        _message.value = "Profile cleared. As-Built reads will fall back to sweeping."
-    }
-
-    fun deleteProfile(stored: StoredProfile) = viewModelScope.launch {
-        profileStore.delete(stored.file)
-        if (_activeProfile.value?.sourceDescription == stored.sourceDescription) {
-            _activeProfile.value = null
-            applyProfileToEngine(null)
-        }
-        refreshProfiles()
-    }
-
-    /** Pushes the profile into the engine, if one is connected. */
-    private fun applyProfileToEngine(profile: LearnedProfile?) {
-        engine?.applyLearnedProfile(profile)
     }
 
     // ---------------------------------------------------------------- routines
