@@ -101,8 +101,10 @@ private enum class Secondary(
     val icon: ImageVector,
 ) {
     AS_BUILT(
-        "asbuilt", "Module configuration",
-        "Read, back up and write As-Built data",
+        // Named for the term people actually search for. "Module
+        // configuration" is more descriptive and completely unfindable.
+        "asbuilt", "As-Built",
+        "Read, back up, edit and write module configuration",
         Icons.Filled.Settings,
     ),
     ROUTINES(
