@@ -1,8 +1,18 @@
 # Truck Scan
 
 An Android diagnostic app for a 2022 Ford F-250 Super Duty, in the spirit of
-FORScan: multi-bus module discovery, per-module fault codes, live data, and
-As-Built configuration read/backup/write.
+FORScan: multi-bus module discovery, per-module fault codes, live data with
+warning thresholds, and As-Built configuration read and backup.
+
+## Installing it
+
+Signed APKs are published under [Releases](../../releases). Download the
+`.apk` on the phone and tap it; Android will ask you to allow installs from
+whatever app is doing the downloading, and Play Protect will note that the app
+did not come from the Play Store. Requires Android 8.0 or newer.
+
+There is no Play Store listing and there will not be one — an app that talks to
+a vehicle's diagnostic bus is not something to hand to strangers.
 
 ## What works, and what does not
 
@@ -13,7 +23,7 @@ app is useful to you.
 with status flags and J2012 failure types, standard OBD-II live data, module
 identification (part numbers, calibration levels, VIN), and As-Built
 configuration blocks. All of it is implemented, and the protocol layers have
-94 passing tests behind them.
+143 passing tests behind them.
 
 **As-Built is read-only, deliberately.** The app reads a module's configuration,
 shows it in Ford's own notation, and saves it as a portable text backup. It does
@@ -89,9 +99,10 @@ bytes are invented. It will not tell you anything about your own truck.
   nothing.
 - Clearing faults also discards freeze-frame data and resets readiness monitors.
   Record faults first.
-- Never write to a module on a weak battery. The app refuses below 12.0 V.
 - Keep your backups off the phone. They are plain text files for exactly that
   reason.
+- Nothing in the app writes to a module. The one operation that changes vehicle
+  state is clearing faults, and it is the one the app asks you to confirm.
 
 ## Building the Android app
 
@@ -138,5 +149,11 @@ too would force every build to resolve it - including the `:core`-only builds
 that run without an Android SDK. The warning is cosmetic; both modules request
 the same Kotlin version.
 
-`:app` compiles and assembles. `:core` additionally has 139 passing tests; the
+`:app` compiles and assembles. `:core` additionally has 143 passing tests; the
 app layer has no automated tests, so its screens are verified by running them.
+A static check, `tools/check-app-references.py`, stands in for part of that gap:
+it runs first in every workflow and fails the build if the UI references a view
+model member or a `:core` symbol that does not exist.
+
+To publish a build other people can install, see
+[docs/RELEASING.md](docs/RELEASING.md).

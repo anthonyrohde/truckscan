@@ -22,8 +22,39 @@ android {
         versionName = "0.1.0"
     }
 
+    // Release signing, driven entirely by environment variables.
+    //
+    // A debug APK is signed with Android's throwaway debug key, which is fine
+    // for your own phone and wrong for anything handed to other people: every
+    // machine generates a different debug key, so an update built elsewhere
+    // will not install over it, and the build is marked debuggable.
+    //
+    // The keystore never enters this repository. CI materialises it from a
+    // secret at build time; locally the same four variables point at your own
+    // file. When they are absent the release build is simply unsigned, so a
+    // clone without the keystore still builds.
+    signingConfigs {
+        create("release") {
+            val keystore = System.getenv("KEYSTORE_PATH")
+            if (keystore != null) {
+                storeFile = file(keystore)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (System.getenv("KEYSTORE_PATH") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+            // Left off deliberately. R8 would shrink the APK, but it also
+            // rewrites reflection-dependent code, and nothing in this project
+            // can currently run an instrumented test to prove a shrunk build
+            // still works. Turning it on is a change to make with a device in
+            // hand, not blind.
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
