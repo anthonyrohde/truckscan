@@ -22,18 +22,22 @@ already have — they would have to uninstall first.
       -validity 10000 \
       -storetype PKCS12
 
-On Windows, `keytool` ships with the JDK you already installed:
+On Windows, `keytool` ships with the JDK you already installed. Supplying
+`-dname` skips six prompts for a name and location that nobody verifies — it
+is a self-signed certificate, and Android only cares that the same key signed
+both builds:
 
     & "$env:JAVA_HOME\bin\keytool.exe" -genkeypair -v `
       -keystore truckscan-release.jks `
       -alias truckscan `
       -keyalg RSA -keysize 4096 `
-      -validity 10000 -storetype PKCS12
+      -validity 10000 -storetype PKCS12 `
+      -dname "CN=Your Name, O=Truck Scan, C=AU"
 
-It asks for a password and then for a name and location. None of it is
-verified by anybody — it is a self-signed certificate, and Android only cares
-that the same key signed both builds. Use the same password for the store and
-the key; the tooling allows them to differ and nothing is gained by it.
+It then asks for a password, twice. **PKCS12 keystores use one password for
+both the store and the key** — keytool will not let them differ — so whatever
+you type here is the value for both `KEYSTORE_PASSWORD` and `KEY_PASSWORD`
+later.
 
 `-validity 10000` is about 27 years. Shorter is a trap: once the certificate
 expires you cannot sign an update that installs over the old one either.
@@ -52,23 +56,24 @@ Encode it:
     base64 -w0 truckscan-release.jks > truckscan-release.jks.b64     # Linux
     base64 -i truckscan-release.jks -o truckscan-release.jks.b64     # macOS
 
-PowerShell:
+PowerShell, straight onto the clipboard so there is no second copy of the key
+lying around to forget about:
 
     [Convert]::ToBase64String([IO.File]::ReadAllBytes("truckscan-release.jks")) `
-      | Set-Content truckscan-release.jks.b64 -NoNewline
+      | Set-Clipboard
 
 Then in the public repository: **Settings → Secrets and variables → Actions →
 New repository secret**, four times:
 
 | Secret | Value |
 | --- | --- |
-| `KEYSTORE_BASE64` | the entire contents of `truckscan-release.jks.b64` |
-| `KEYSTORE_PASSWORD` | the store password you chose |
+| `KEYSTORE_BASE64` | the base64 text from the step above |
+| `KEYSTORE_PASSWORD` | the password you chose |
 | `KEY_ALIAS` | `truckscan` |
-| `KEY_PASSWORD` | the key password (same as the store password, if you followed the advice above) |
+| `KEY_PASSWORD` | the same password again — PKCS12 permits only one |
 
-Delete the `.b64` file afterwards. It is the keystore in a form anybody can
-read.
+If you wrote the base64 to a file rather than the clipboard, delete the file
+afterwards. It is the keystore in a form anybody can read.
 
 The workflow writes the keystore to the runner's temporary directory — outside
 the checkout, so nothing the build archives can pick it up — and deletes it in
