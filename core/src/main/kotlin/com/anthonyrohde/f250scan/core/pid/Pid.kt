@@ -55,7 +55,16 @@ data class Pid(
         return if (unit.isEmpty()) number else "$number $unit"
     }
 
-    /** Fraction of the way through the expected range, for gauge rendering. */
+    /**
+     * Fraction of the way through the expected range, for gauge rendering.
+     *
+     * [minValue] and [maxValue] describe the range worth *displaying*, not the
+     * range the PID can encode. Several PIDs have theoretical maxima orders of
+     * magnitude above anything an engine produces - mass air flow reaches
+     * 655 g/s on paper and about 400 in practice - and using those flattens the
+     * gauge into a permanently empty bar. Decoding is unaffected; this only
+     * scales the bar.
+     */
     fun normalise(value: Double): Double =
         if (maxValue <= minValue) 0.0
         else ((value - minValue) / (maxValue - minValue)).coerceIn(0.0, 1.0)
@@ -109,7 +118,9 @@ object PidCatalog {
 
     val MAF_RATE = Pid(
         id = 0x10, name = "Mass air flow", unit = "g/s", byteCount = 2,
-        minValue = 0.0, maxValue = 655.0, decimals = 2,
+        // The PID tops out at 655 g/s, but a 6.7L idles near 10 and peaks
+        // around 400 under full load, so that range leaves the gauge flat.
+        minValue = 0.0, maxValue = 400.0, decimals = 2,
     ) { ((it.u8(0) * 256) + it.u8(1)) / 100.0 }
 
     val THROTTLE_POSITION = Pid(
@@ -124,12 +135,16 @@ object PidCatalog {
 
     val DISTANCE_WITH_MIL = Pid(
         id = 0x21, name = "Distance travelled with MIL on", unit = "km", byteCount = 2,
-        minValue = 0.0, maxValue = 65535.0, decimals = 0,
+        // Anything past a few thousand km with the light on is the same
+        // message: it has been ignored for a long time.
+        minValue = 0.0, maxValue = 5000.0, decimals = 0,
     ) { ((it.u8(0) * 256) + it.u8(1)).toDouble() }
 
     val FUEL_RAIL_PRESSURE = Pid(
         id = 0x23, name = "Fuel rail gauge pressure", unit = "kPa", byteCount = 2,
-        minValue = 0.0, maxValue = 655350.0, decimals = 0,
+        // Common rail on the 6.7L runs to roughly 2000 bar; the PID's own
+        // ceiling of 655350 kPa is three times higher than the engine reaches.
+        minValue = 0.0, maxValue = 250_000.0, decimals = 0,
     ) { ((it.u8(0) * 256) + it.u8(1)) * 10.0 }
 
     val COMMANDED_EGR = Pid(
@@ -159,7 +174,9 @@ object PidCatalog {
 
     val ABSOLUTE_LOAD = Pid(
         id = 0x43, name = "Absolute load value", unit = "%", byteCount = 2,
-        minValue = 0.0, maxValue = 25700.0,
+        // A percentage. It exceeds 100 on a boosted engine, but never the
+        // 25700 the formula theoretically allows.
+        minValue = 0.0, maxValue = 200.0,
     ) { ((it.u8(0) * 256) + it.u8(1)) * 100.0 / 255.0 }
 
     val AMBIENT_AIR_TEMP = Pid(
@@ -179,7 +196,8 @@ object PidCatalog {
 
     val FUEL_RATE = Pid(
         id = 0x5E, name = "Engine fuel rate", unit = "L/h", byteCount = 2,
-        minValue = 0.0, maxValue = 3212.0, decimals = 2,
+        // Even towing hard, a 6.7L stays well under 120 L/h.
+        minValue = 0.0, maxValue = 120.0, decimals = 2,
     ) { ((it.u8(0) * 256) + it.u8(1)) / 20.0 }
 
     val DEMANDED_TORQUE = Pid(
@@ -194,7 +212,9 @@ object PidCatalog {
 
     val REFERENCE_TORQUE = Pid(
         id = 0x63, name = "Engine reference torque", unit = "Nm", byteCount = 2,
-        minValue = 0.0, maxValue = 65535.0, decimals = 0,
+        // The 6.7L is rated near 1600 Nm; 2500 leaves headroom without
+        // flattening the gauge.
+        minValue = 0.0, maxValue = 2500.0, decimals = 0,
     ) { ((it.u8(0) * 256) + it.u8(1)).toDouble() }
 
     /**

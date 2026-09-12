@@ -84,7 +84,10 @@ class SimulatedVehicleTransport(
             dids = mutableMapOf(
                 0xF190 to ascii("1FT8W2BT7NEC12345", 17),
                 0xF187 to ascii("LC3A-14C204-BFD", 16),
-                0xF188 to ascii("LC3A-14C204-BFD", 16),
+                // Distinct from the part number: a module's calibration level
+                // moves with reflashes while its hardware part number does not,
+                // and showing the same string for both hides that.
+                0xF188 to ascii("LC3A-14C204-AKG", 16),
                 0xF18C to ascii("PCM0012345678", 14),
                 // Two invented configuration blocks, with a two's complement
                 // checksum as the final byte so checksum detection has
