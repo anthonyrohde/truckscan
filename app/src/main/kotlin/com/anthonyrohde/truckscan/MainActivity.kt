@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -64,6 +65,14 @@ import com.anthonyrohde.truckscan.ui.theme.TruckScanTheme
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Targeting API 36 makes edge-to-edge compulsory: the window draws
+        // behind the status and navigation bars whether or not it asks to, and
+        // the opt-out that existed under API 35 is gone. Calling this is what
+        // makes that survivable - it sets the bars transparent and keeps their
+        // icons legible against whatever is behind them. Without it the system
+        // still goes edge-to-edge, just with system bar icons that can vanish
+        // into the background. Scaffold then supplies the insets as padding.
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
             TruckScanTheme {

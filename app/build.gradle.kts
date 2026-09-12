@@ -10,14 +10,17 @@ plugins {
 
 android {
     namespace = "com.anthonyrohde.truckscan"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.anthonyrohde.truckscan"
         // API 26 covers every phone that can realistically be used in a truck
         // and avoids the pre-Oreo Bluetooth quirks entirely.
         minSdk = 26
-        targetSdk = 35
+        // Android 16. Google Play requires API 36 of new apps and updates
+        // from 31 August 2026. Targeting it also opts into edge-to-edge with
+        // no way back - see enableEdgeToEdge() in MainActivity.
+        targetSdk = 36
         // versionCode must increase for every release; Android refuses to
         // install a lower code over a higher one. It starts at 2 because the
         // rolling debug build already went out as 1.

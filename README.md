@@ -116,8 +116,7 @@ The `:app` module needs an Android SDK; `:core` does not. `settings.gradle.kts`
 not list it, that is why — it is not a broken checkout.
 
 1. **Install Android Studio** (or just the command-line tools). Through the SDK
-   Manager install **SDK Platform 35** and the latest **Android SDK
-   Build-Tools**.
+   Manager install **SDK Platform 36** and **Build-Tools 36.0.0**.
 
 2. **Point the build at the SDK.** Either set `ANDROID_HOME`, or create
    `local.properties` in the repository root:
@@ -128,7 +127,7 @@ not list it, that is why — it is not a broken checkout.
 
    `local.properties` is gitignored, which is correct — it is machine-specific.
 
-3. **Use JDK 17 or newer.** Android Gradle Plugin 8.7.3 requires it. Android
+3. **Use JDK 17 or newer.** Android Gradle Plugin 8.9.1 requires it. Android
    Studio bundles a suitable JDK; from the command line check with `java -version`.
 
 4. **Build:**
