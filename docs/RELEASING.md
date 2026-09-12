@@ -11,6 +11,22 @@ signed with the same key installs cleanly over the last one.
 
 ## One-time: make a signing key
 
+### The short way
+
+`tools/make-keystore.sh` does everything in this section — generates the key,
+verifies it, puts its base64 on the clipboard, and takes a backup copy. It
+works on any machine with a JDK, including a phone under Termux, where typing
+a six-line `keytool` invocation on a touch keyboard is its own failure mode:
+
+    pkg install -y openjdk-17 termux-api    # Termux only
+    curl -O https://raw.githubusercontent.com/anthonyrohde/truckscan/main/tools/make-keystore.sh
+    bash make-keystore.sh
+
+The rest of this section is what that script does, for when you would rather
+run it yourself.
+
+## Doing it by hand
+
 Do this **once**, on a machine you control, and then never again. If you lose
 this file you cannot ship an update that installs over what your friends
 already have — they would have to uninstall first.
