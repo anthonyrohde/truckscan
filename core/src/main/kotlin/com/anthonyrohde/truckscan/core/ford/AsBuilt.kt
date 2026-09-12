@@ -264,10 +264,10 @@ object AsBuiltDidMap {
 /**
  * A complete configuration snapshot of one module.
  *
- * Taking one of these is mandatory before any write - see
- * [com.anthonyrohde.truckscan.core.session.AsBuiltWriter]. It is the only route
- * back if a change turns out badly, so it records enough context to be
- * restorable on a different day from a different phone.
+ * Take one before changing anything in FORScan. This app does not write, so a
+ * snapshot is not a precondition for anything it does - it is the record that
+ * lets a change made elsewhere be undone, which is why it carries enough
+ * context to be usable on a different day from a different phone.
  */
 data class AsBuiltSnapshot(
     val moduleCode: String,
