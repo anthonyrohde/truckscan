@@ -37,6 +37,10 @@ jobs:
 
       # Run the protocol tests first. An APK that assembles from a core with
       # failing tests is worse than no APK, because it looks fine.
+      # Cheap and fails fast; the Android compile below takes minutes.
+      - name: Check app references resolve
+        run: python3 tools/check-app-references.py
+
       - name: Core protocol tests
         run: ./gradlew :core:test
 

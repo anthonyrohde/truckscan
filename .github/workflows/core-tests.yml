@@ -21,6 +21,14 @@ jobs:
       # No Android SDK needed: :core is pure Kotlin/JVM and settings.gradle.kts
       # skips :app when no SDK is present. This is the whole reason for the
       # module split - the protocol logic is verifiable in CI on its own.
+      # Runs before the tests because it takes a second and catches a class of
+      # break the core tests structurally cannot: a change to the view model
+      # that leaves the screens calling something that no longer exists. The
+      # :app module needs an Android SDK to compile, so in environments without
+      # one this is the only thing standing between such an edit and CI.
+      - name: Check app references resolve
+        run: python3 tools/check-app-references.py
+
       - name: Run core protocol tests
         run: ./gradlew :core:test --no-daemon
 

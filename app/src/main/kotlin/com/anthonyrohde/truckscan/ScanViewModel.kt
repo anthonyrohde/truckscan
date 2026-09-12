@@ -349,6 +349,84 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         refreshSnapshots()
     }
 
+    // ----------------------------------------------------------- trace importing
+
+    fun refreshProfiles() = viewModelScope.launch {
+        _profiles.value = profileStore.list()
+    }
+
+    /**
+     * Imports a bus capture and learns what it can from it.
+     *
+     * [text] is the raw log contents; [name] is shown so the user can tell
+     * profiles apart later. Nothing about the vehicle is touched - this is
+     * purely reading a file.
+     */
+    fun importTrace(text: String, name: String) = viewModelScope.launch {
+        _busy.value = Busy.Working("Analysing $name")
+        try {
+            val (profile, report) = TraceLogAnalyzer(log::append).analyseText(text, name)
+            _lastImportReport.value = report
+
+            if (report.isEmpty) {
+                _message.value = report.describe()
+                return@launch
+            }
+            if (profile.isEmpty) {
+                _message.value = "Read ${report.framesParsed} frame(s) from $name, but " +
+                    "found no configuration reads or writes to learn from. A capture of " +
+                    "a module configuration read is what this needs."
+                return@launch
+            }
+
+            val file = profileStore.save(profile)
+            profileStore.setActive(file)
+            _activeProfile.value = profile
+            applyProfileToEngine(profile)
+            refreshProfiles()
+
+            _message.value = "Learned from $name: " +
+                "${profile.modules.count { it.hasAnything }} module(s), saved as ${file.name}."
+        } catch (e: Exception) {
+            _message.value = "Could not analyse $name: ${e.message}"
+        } finally {
+            _busy.value = Busy.Idle
+        }
+    }
+
+    fun activateProfile(stored: StoredProfile) = viewModelScope.launch {
+        val profile = profileStore.load(stored.file)
+        if (profile == null) {
+            _message.value = "Could not read ${stored.file.name}."
+            return@launch
+        }
+        profileStore.setActive(stored.file)
+        _activeProfile.value = profile
+        applyProfileToEngine(profile)
+        _message.value = "Applied ${stored.file.name}."
+    }
+
+    fun clearActiveProfile() = viewModelScope.launch {
+        profileStore.setActive(null)
+        _activeProfile.value = null
+        applyProfileToEngine(null)
+        _message.value = "Profile cleared. As-Built reads will fall back to sweeping."
+    }
+
+    fun deleteProfile(stored: StoredProfile) = viewModelScope.launch {
+        profileStore.delete(stored.file)
+        if (_activeProfile.value?.sourceDescription == stored.sourceDescription) {
+            _activeProfile.value = null
+            applyProfileToEngine(null)
+        }
+        refreshProfiles()
+    }
+
+    /** Pushes the profile into the engine, if one is connected. */
+    private fun applyProfileToEngine(profile: LearnedProfile?) {
+        engine?.applyLearnedProfile(profile)
+    }
+
     // ---------------------------------------------------------------- routines
 
     fun runRoutine(routine: ServiceRoutine, module: DiscoveredModule) = viewModelScope.launch {
