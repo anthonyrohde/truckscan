@@ -8,7 +8,11 @@ name: Build debug APK
 # zip and hunting for an extractor.
 on:
   push:
-    branches: ["claude/f250-obd2-diagnostic-app-*"]
+    # main is the public repository's branch; the claude/... pattern is the
+    # development branch in the private monorepo this project started in.
+    # The monorepo's own default branch does not carry this file, so listing
+    # main here cannot make unrelated commits there build an Android app.
+    branches: ["main", "claude/f250-obd2-diagnostic-app-*"]
   workflow_dispatch:
 
 permissions:
