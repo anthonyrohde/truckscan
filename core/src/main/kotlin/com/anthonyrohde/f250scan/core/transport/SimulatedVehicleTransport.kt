@@ -143,23 +143,75 @@ class SimulatedVehicleTransport(
         ),
     ).associateBy { it.requestId }
 
-    /** Live parameter values the simulator reports for mode 01. */
+    /**
+     * Live parameter values the simulator reports for mode 01.
+     *
+     * A warm 6.7L at idle: 788 rpm, 85 degrees coolant, 300 bar rail, exhaust
+     * temperatures in the low 300s. Chosen so every gauge reads in its normal
+     * band, which makes the warning panel's behaviour obvious when a value is
+     * pushed out of range.
+     *
+     * The support masks are computed to match exactly what is served here, so
+     * the app's "which parameters does this vehicle have" query behaves as it
+     * would on a real truck rather than advertising everything.
+     */
     private val livePids: Map<Int, ByteArray> = mapOf(
-        0x00 to byteArrayOf(0xBE.toByte(), 0x3F, 0xA8.toByte(), 0x13),
-        0x04 to byteArrayOf(0x4C),
-        0x05 to byteArrayOf(0x5A), // 90 - 40 = 50 C
-        0x0B to byteArrayOf(0x68),
-        0x0C to byteArrayOf(0x0C, 0x50), // (0x0C50)/4 = 788 rpm
-        0x0D to byteArrayOf(0x00),
-        0x0F to byteArrayOf(0x46),
-        0x10 to byteArrayOf(0x02, 0x1C),
-        0x11 to byteArrayOf(0x1A),
-        0x1F to byteArrayOf(0x03, 0x20),
-        0x2F to byteArrayOf(0x9A.toByte()),
-        0x42 to byteArrayOf(0x36, 0xB0.toByte()), // 14.0 V
-        0x46 to byteArrayOf(0x3C),
-        0x5C to byteArrayOf(0x64),
-        0x5E to byteArrayOf(0x00, 0x3C),
+        // Support masks. Bit 0 of the last byte of each says a further bank follows.
+        0x00 to byteArrayOf(0x1E, 0x7F, 0x80.toByte(), 0x03),
+        0x20 to byteArrayOf(0xA0.toByte(), 0x1B, 0xA0.toByte(), 0x01),
+        0x40 to byteArrayOf(0x6C, 0xDC.toByte(), 0x00, 0x1D),
+        0x60 to byteArrayOf(0xE0.toByte(), 0x00, 0x23, 0x10),
+
+        0x04 to byteArrayOf(0x4C),                       // load 29.8%
+        0x05 to byteArrayOf(0x7D),                       // coolant 85 C
+        0x06 to byteArrayOf(0x80.toByte()),              // short trim 0%
+        0x07 to byteArrayOf(0x84.toByte()),              // long trim +3.1%
+        0x0A to byteArrayOf(0x64),                       // fuel pressure 300 kPa
+        0x0B to byteArrayOf(0x68),                       // MAP 104 kPa
+        0x0C to byteArrayOf(0x0C, 0x50),                 // 788 rpm
+        0x0D to byteArrayOf(0x00),                       // stationary
+        0x0E to byteArrayOf(0x80.toByte()),              // timing 0 deg
+        0x0F to byteArrayOf(0x46),                       // intake air 30 C
+        0x10 to byteArrayOf(0x02, 0x1C),                 // MAF 5.40 g/s
+        0x11 to byteArrayOf(0x1A),                       // throttle 10.2%
+        0x1F to byteArrayOf(0x03, 0x20),                 // 800 s since start
+        0x21 to byteArrayOf(0x00, 0x00),                 // no distance with MIL
+        0x23 to byteArrayOf(0x0B, 0xB8.toByte()),        // rail 30000 kPa
+        0x2C to byteArrayOf(0x33),                       // commanded EGR 20%
+        0x2D to byteArrayOf(0x80.toByte()),              // EGR error 0%
+        0x2F to byteArrayOf(0x9A.toByte()),              // fuel 60%
+        0x30 to byteArrayOf(0x05),                       // 5 warm-ups
+        0x31 to byteArrayOf(0x04, 0xD2.toByte()),        // 1234 km since clear
+        0x33 to byteArrayOf(0x65),                       // baro 101 kPa
+        0x42 to byteArrayOf(0x36, 0xB0.toByte()),        // 14.00 V
+        0x43 to byteArrayOf(0x00, 0x50),                 // absolute load 31.4%
+        0x45 to byteArrayOf(0x0A),                       // relative throttle 3.9%
+        0x46 to byteArrayOf(0x3C),                       // ambient 20 C
+        0x49 to byteArrayOf(0x1A),                       // pedal D 10.2%
+        0x4A to byteArrayOf(0x18),                       // pedal E 9.4%
+        0x4C to byteArrayOf(0x20),                       // commanded throttle 12.5%
+        0x4D to byteArrayOf(0x00, 0x00),                 // no time with MIL
+        0x4E to byteArrayOf(0x00, 0xF0.toByte()),        // 240 min since clear
+        0x5C to byteArrayOf(0x73),                       // oil 75 C
+        0x5D to byteArrayOf(0x6B, 0x80.toByte()),        // injection timing 5 deg
+        0x5E to byteArrayOf(0x00, 0x78),                 // fuel rate 6.0 L/h
+        0x61 to byteArrayOf(0x8C.toByte()),              // demanded torque 15%
+        0x62 to byteArrayOf(0x8A.toByte()),              // actual torque 13%
+        0x63 to byteArrayOf(0x06, 0x40),                 // reference torque 1600 Nm
+        0x73 to byteArrayOf(0x01, 0x34, 0x80.toByte()),  // exhaust pressure 105 kPa
+        0x77 to byteArrayOf(0x01, 0x4B, 0x00),           // charge air 35 C
+        // Four exhaust gas temperatures behind one bitmask-packed PID.
+        0x78 to byteArrayOf(
+            0x0F,                                        // all four sensors present
+            0x0E, 0x10,                                  // EGT1 320 C
+            0x0D, 0x16,                                  // EGT2 295 C
+            0x0C, 0x80.toByte(),                         // EGT3 280 C
+            0x0B, 0xEA.toByte(),                         // EGT4 265 C
+        ),
+        0x7C to byteArrayOf(
+            0x01, 0x0A, 0xF0.toByte(), 0x0A, 0xF0.toByte(),
+            0x0A, 0xF0.toByte(), 0x0A, 0xF0.toByte(),    // DPF 240 C
+        ),
     )
 
     // ------------------------------------------------------------------ transport

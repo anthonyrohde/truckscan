@@ -2,6 +2,7 @@ package com.anthonyrohde.f250scan.core
 
 import com.anthonyrohde.f250scan.core.adapter.CanFrame
 import com.anthonyrohde.f250scan.core.pid.PidCatalog
+import com.anthonyrohde.f250scan.core.pid.ZoneSeverity
 import com.anthonyrohde.f250scan.core.util.Hex
 import com.anthonyrohde.f250scan.core.util.u16
 import com.anthonyrohde.f250scan.core.util.u8
@@ -185,8 +186,91 @@ class PidDecodeTest {
     }
 
     @Test
-    fun `catalog has no duplicate pid ids`() {
-        val ids = PidCatalog.ALL.map { it.id }
-        assertEquals(ids.size, ids.distinct().size, "duplicate PID definitions would shadow")
+    fun `catalog has no duplicate parameter keys`() {
+        // Keys must be unique; PID ids deliberately are not, because several
+        // diesel PIDs carry more than one sensor.
+        val keys = PidCatalog.ALL.map { it.key }
+        assertEquals(keys.size, keys.distinct().size, "duplicate keys would shadow")
+    }
+
+    @Test
+    fun `exhaust gas temperatures share one pid but not one key`() {
+        val egt = listOf(
+            PidCatalog.EGT_1, PidCatalog.EGT_2, PidCatalog.EGT_3, PidCatalog.EGT_4,
+        )
+        assertEquals(setOf(0x78), egt.map { it.id }.toSet(), "all four ride on PID 0x78")
+        assertEquals(4, egt.map { it.key }.distinct().size)
+    }
+
+    @Test
+    fun `bitmask packed sensors decode from their own slot`() {
+        // Support byte says all four present, then four 16-bit values,
+        // each (256*hi + lo) / 10 - 40.
+        val payload = Hex.decode("0F" + "0E10" + "0D16" + "0C80" + "0BEA")
+
+        assertEquals(320.0, PidCatalog.EGT_1.decode(payload)!!.value, 0.01)
+        assertEquals(295.0, PidCatalog.EGT_2.decode(payload)!!.value, 0.01)
+        assertEquals(280.0, PidCatalog.EGT_3.decode(payload)!!.value, 0.01)
+        assertEquals(265.0, PidCatalog.EGT_4.decode(payload)!!.value, 0.01)
+    }
+
+    @Test
+    fun `an absent packed sensor decodes to nothing rather than a wrong number`() {
+        // Only sensors 1 and 3 present. Sensor 3's data is the SECOND pair,
+        // not the third: absent sensors occupy no bytes.
+        val payload = Hex.decode("05" + "0E10" + "0C80")
+
+        assertEquals(320.0, PidCatalog.EGT_1.decode(payload)!!.value, 0.01)
+        assertNull(PidCatalog.EGT_2.decode(payload), "sensor 2 is not fitted")
+        assertEquals(
+            280.0, PidCatalog.EGT_3.decode(payload)!!.value, 0.01,
+            "sensor 3 must be read from the second slot, not the third",
+        )
+        assertNull(PidCatalog.EGT_4.decode(payload))
+    }
+
+    @Test
+    fun `zones classify a reading and name the condition`() {
+        val cold = PidCatalog.COOLANT_TEMP.decode(byteArrayOf(0x50))!!   // 40 C
+        val normal = PidCatalog.COOLANT_TEMP.decode(byteArrayOf(0x7D))!! // 85 C
+        val hot = PidCatalog.COOLANT_TEMP.decode(byteArrayOf(0x92.toByte()))!! // 106 C
+        val boiling = PidCatalog.COOLANT_TEMP.decode(byteArrayOf(0x9C.toByte()))!! // 116 C
+
+        assertEquals(ZoneSeverity.CAUTION, cold.severity)
+        assertEquals(ZoneSeverity.NORMAL, normal.severity)
+        assertEquals(ZoneSeverity.WARNING, hot.severity)
+        assertEquals(ZoneSeverity.CRITICAL, boiling.severity)
+        assertEquals("Overheating", boiling.zone?.label)
+    }
+
+    @Test
+    fun `a parameter with no zones is always normal`() {
+        val maf = PidCatalog.MAF_RATE.decode(byteArrayOf(0x02, 0x1C))!!
+        assertEquals(ZoneSeverity.NORMAL, maf.severity)
+        assertNull(maf.zone)
+    }
+
+    @Test
+    fun `new diesel decoders match hand computed values`() {
+        // Rail pressure: (0x0BB8) * 10 = 30000 kPa, i.e. 300 bar at idle.
+        assertEquals(
+            30_000.0,
+            PidCatalog.FUEL_RAIL_PRESSURE.decode(byteArrayOf(0x0B, 0xB8.toByte()))!!.value,
+            0.01,
+        )
+        // Injection timing: (0x6B80 / 128) - 210 = 5 degrees.
+        assertEquals(
+            5.0,
+            PidCatalog.INJECTION_TIMING.decode(byteArrayOf(0x6B, 0x80.toByte()))!!.value,
+            0.01,
+        )
+        // Fuel trim is centred on 128, not 0.
+        assertEquals(0.0, PidCatalog.SHORT_TRIM_1.decode(byteArrayOf(0x80.toByte()))!!.value, 0.01)
+        // Exhaust pressure: support byte then (0x3480) / 128 = 105 kPa.
+        assertEquals(
+            105.0,
+            PidCatalog.EXHAUST_PRESSURE.decode(Hex.decode("013480"))!!.value,
+            0.01,
+        )
     }
 }

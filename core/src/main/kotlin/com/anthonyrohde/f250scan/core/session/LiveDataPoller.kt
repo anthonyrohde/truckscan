@@ -14,10 +14,18 @@ import kotlinx.coroutines.flow.flow
 
 /** One sweep of the selected parameters. */
 data class LiveDataSample(
-    val values: Map<Int, PidValue>,
+    /**
+     * Readings keyed by [com.anthonyrohde.f250scan.core.pid.Pid.key], not by
+     * OBD PID. Several diesel PIDs carry more than one sensor - the four
+     * exhaust gas temperatures all arrive under 0x78 - so keying by PID would
+     * let them overwrite each other.
+     */
+    val values: Map<String, PidValue>,
     val timestampMillis: Long = System.currentTimeMillis(),
-    /** Parameters that failed this sweep, so the UI can grey them out. */
-    val failedPids: Set<Int> = emptySet(),
+    /** Parameters that did not decode this sweep, so the UI can grey them out. */
+    val failedKeys: Set<String> = emptySet(),
+    /** Wall-clock duration of the sweep, so the UI can show the achieved rate. */
+    val sweepMillis: Long = 0,
 )
 
 /**
@@ -69,22 +77,45 @@ class LiveDataPoller(
         // supported; offering the whole catalog is the safer fallback.
         if (supported.isEmpty()) return PidCatalog.ALL
         return PidCatalog.ALL.filter { it.id in supported }
+            // A multi-sensor PID reports support for the PID, not per sensor.
+            // Sensors that are absent decode to nothing and drop out on the
+            // first sweep rather than sitting on the dashboard forever.
+            .distinctBy { it.key }
     }
 
-    /** Reads [pids] once. */
+    /**
+     * Reads [pids] once.
+     *
+     * Requests are grouped by OBD PID so a multi-sensor parameter costs one
+     * round trip rather than one per sensor: watching all four exhaust gas
+     * temperatures is a single request, not four.
+     */
     suspend fun sampleOnce(pids: List<Pid>): LiveDataSample {
         // Legislated OBD-II is answered by the powertrain on HS-CAN1, so a
         // sample taken after reading a body module has to come back here first.
         runCatching { busRouter?.ensureBus(CanBus.HS_CAN1) }
-        val values = linkedMapOf<Int, PidValue>()
-        val failed = mutableSetOf<Int>()
 
-        for (pid in pids) {
-            val payload = requestPid(pid.id)
-            val decoded = payload?.let { pid.decode(it) }
-            if (decoded != null) values[pid.id] = decoded else failed += pid.id
+        val startedAt = System.currentTimeMillis()
+        val values = linkedMapOf<String, PidValue>()
+        val failed = mutableSetOf<String>()
+
+        for ((pidId, group) in pids.groupBy { it.id }) {
+            val payload = requestPid(pidId)
+            if (payload == null) {
+                group.forEach { failed += it.key }
+                continue
+            }
+            for (pid in group) {
+                val decoded = pid.decode(payload)
+                if (decoded != null) values[pid.key] = decoded else failed += pid.key
+            }
         }
-        return LiveDataSample(values, failedPids = failed)
+
+        return LiveDataSample(
+            values = values,
+            failedKeys = failed,
+            sweepMillis = System.currentTimeMillis() - startedAt,
+        )
     }
 
     /**

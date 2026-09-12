@@ -7,6 +7,8 @@ import com.anthonyrohde.f250scan.core.adapter.CanBus
 import com.anthonyrohde.f250scan.core.ford.AsBuiltSnapshot
 import com.anthonyrohde.f250scan.core.pid.Pid
 import com.anthonyrohde.f250scan.core.pid.PidCatalog
+import com.anthonyrohde.f250scan.core.pid.PidValue
+import com.anthonyrohde.f250scan.core.pid.ZoneSeverity
 import com.anthonyrohde.f250scan.core.session.BlockChange
 import com.anthonyrohde.f250scan.core.session.ConnectionState
 import com.anthonyrohde.f250scan.core.session.DiagnosticEngine
@@ -74,8 +76,19 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     private val _availablePids = MutableStateFlow<List<Pid>>(PidCatalog.ALL)
     val availablePids: StateFlow<List<Pid>> = _availablePids.asStateFlow()
 
-    private val _selectedPids = MutableStateFlow(DEFAULT_PID_SELECTION)
-    val selectedPids: StateFlow<Set<Int>> = _selectedPids.asStateFlow()
+    private val _selectedPids = MutableStateFlow(PidCatalog.DEFAULT_SELECTION.toSet())
+    val selectedPids: StateFlow<Set<String>> = _selectedPids.asStateFlow()
+
+    /**
+     * Readings currently outside their normal band, worst first.
+     *
+     * This is the warning-light feed. It is derived rather than stored so it
+     * cannot drift from the readings on screen, and it is deliberately ordered
+     * by severity: on a dash-mounted phone the first line is the only one
+     * guaranteed to be read.
+     */
+    private val _alerts = MutableStateFlow<List<PidValue>>(emptyList())
+    val alerts: StateFlow<List<PidValue>> = _alerts.asStateFlow()
 
     private val _snapshots = MutableStateFlow<List<StoredSnapshot>>(emptyList())
     val snapshots: StateFlow<List<StoredSnapshot>> = _snapshots.asStateFlow()
@@ -223,14 +236,18 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
 
     // --------------------------------------------------------------- live data
 
-    fun togglePid(pidId: Int) {
+    fun togglePid(key: String) {
         val current = _selectedPids.value
-        _selectedPids.value = if (pidId in current) current - pidId else current + pidId
+        _selectedPids.value = if (key in current) current - key else current + key
+    }
+
+    fun selectOnly(keys: Collection<String>) {
+        _selectedPids.value = keys.toSet()
     }
 
     fun startLiveData() {
         val active = engine ?: return
-        val pids = _availablePids.value.filter { it.id in _selectedPids.value }
+        val pids = _availablePids.value.filter { it.key in _selectedPids.value }
         if (pids.isEmpty()) {
             _message.value = "Select at least one parameter to watch."
             return
@@ -240,7 +257,12 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         liveDataJob = viewModelScope.launch {
             try {
                 active.liveData.stream(pids, intervalMillis = 200)
-                    .collect { _liveSample.value = it }
+                    .collect { sample ->
+                        _liveSample.value = sample
+                        _alerts.value = sample.values.values
+                            .filter { it.severity != ZoneSeverity.NORMAL }
+                            .sortedByDescending { it.severity.ordinal }
+                    }
             } catch (e: Exception) {
                 _message.value = e.message
             }
@@ -250,6 +272,9 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     fun stopLiveData() {
         liveDataJob?.cancel()
         liveDataJob = null
+        // Stale alerts are worse than none: a warning left on screen after
+        // polling stopped implies the condition is still being watched.
+        _alerts.value = emptyList()
     }
 
     val isStreaming: Boolean get() = liveDataJob?.isActive == true
@@ -481,15 +506,4 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
     }
 
-    companion object {
-        /** A sensible default dashboard for a diesel: the things that matter first. */
-        private val DEFAULT_PID_SELECTION = setOf(
-            PidCatalog.ENGINE_RPM.id,
-            PidCatalog.COOLANT_TEMP.id,
-            PidCatalog.ENGINE_LOAD.id,
-            PidCatalog.FUEL_RAIL_PRESSURE.id,
-            PidCatalog.CONTROL_MODULE_VOLTAGE.id,
-            PidCatalog.DPF_TEMP_BANK1.id,
-        )
-    }
 }

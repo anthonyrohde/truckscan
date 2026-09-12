@@ -198,7 +198,7 @@ class DiagnosticEngine(
      */
     suspend fun readControlModuleVoltage(): Double? =
         liveData.sampleOnce(listOf(PidCatalog.CONTROL_MODULE_VOLTAGE))
-            .values[PidCatalog.CONTROL_MODULE_VOLTAGE.id]
+            .values[PidCatalog.CONTROL_MODULE_VOLTAGE.key]
             ?.value
 
     /** The VIN, from whichever discovered module reports one. */

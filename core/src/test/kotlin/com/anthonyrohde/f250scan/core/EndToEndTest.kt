@@ -194,10 +194,10 @@ class EndToEndTest {
             ),
         )
 
-        assertEquals(788.0, sample.values[PidCatalog.ENGINE_RPM.id]!!.value, 0.001)
-        assertEquals(50.0, sample.values[PidCatalog.COOLANT_TEMP.id]!!.value, 0.001)
-        assertEquals(14.0, sample.values[PidCatalog.CONTROL_MODULE_VOLTAGE.id]!!.value, 0.001)
-        assertTrue(sample.failedPids.isEmpty())
+        assertEquals(788.0, sample.values[PidCatalog.ENGINE_RPM.key]!!.value, 0.001)
+        assertEquals(85.0, sample.values[PidCatalog.COOLANT_TEMP.key]!!.value, 0.001)
+        assertEquals(14.0, sample.values[PidCatalog.CONTROL_MODULE_VOLTAGE.key]!!.value, 0.001)
+        assertTrue(sample.failedKeys.isEmpty())
     }
 
     @Test
