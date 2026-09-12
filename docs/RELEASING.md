@@ -106,12 +106,22 @@ act rather than something that happens on every commit. The rolling
 
 ### If you cannot push a tag
 
-Some credentials are allowed to push branches and refused on `refs/tags`.
-The same workflow can be started by hand instead: **Actions → Build signed
-release APK → Run workflow**, with the version in the box (`v1.0.0`). It
-creates the tag against the commit it builds, so the result is identical to
-a tag push. The input is checked against a version pattern first — a typo
-there would otherwise become a permanent public tag.
+Some credentials are allowed to push branches and refused on `refs/tags`
+entirely. Two fallbacks, both cutting exactly the same release:
+
+- **Push a release branch.** `git push origin main:refs/heads/release/v1.0.0`
+  needs only branch permission. The branch is disposable — delete it once the
+  release exists; the tag is what persists.
+- **Start the workflow by hand.** **Actions → Build signed release APK → Run
+  workflow**, with the version in the box.
+
+Either way the job creates the tag against the commit it built, so the result
+is identical to a tag push. The version is checked against a pattern first — a
+typo would otherwise become a permanent public tag.
+
+A release that already exists is never overwritten; the run fails instead.
+Re-pushing a release branch is an easy accident, and silently replacing an APK
+people have already downloaded is not something you can take back.
 
 The workflow verifies the APK is actually signed, with
 `apksigner verify --print-certs`, before publishing it. An unsigned or

@@ -5,12 +5,17 @@ name: Build signed release APK
 # pushed, so publishing is a deliberate act rather than a side effect of every
 # commit - the rolling debug build already covers day-to-day testing.
 on:
-  push:
-    tags: ["v*"]
-  # Dispatch exists because pushing a tag is not always available - a
+  # Three ways in, because pushing a tag is not always available: a
   # restricted credential can be allowed to push branches and refused on
-  # refs/tags. Given a version, this job creates the tag itself from the
-  # commit it ran against, so the release is cut either way.
+  # refs/tags entirely. All three land in the same job, and the job creates
+  # the tag itself from the commit it built, so the result is identical.
+  push:
+    # The normal path.
+    tags: ["v*"]
+    # The fallback: a branch named for the version, e.g. release/v1.0.0.
+    # Creating one is as deliberate as tagging, and needs only branch
+    # permission. The branch is disposable - the tag is what persists.
+    branches: ["release/v*"]
   workflow_dispatch:
     inputs:
       version:
@@ -75,15 +80,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # On a tag push the ref is the version. On a dispatch it is the
-          # branch name, so take the input instead and let gh create the tag
-          # against this exact commit.
+          # A tag push gives the version directly; a release/v1.0.0 branch
+          # gives it after the prefix; a dispatch supplies it as input.
           VERSION="${{ inputs.version || github.ref_name }}"
+          VERSION="${VERSION#release/}"
 
           # Refuse anything that is not a version. A dispatch input is free
           # text, and a typo here becomes a permanent public tag.
           if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
             echo "Not a version: '$VERSION'. Expected something like v1.0.0." >&2
+            exit 1
+          fi
+
+          # Never quietly replace a release people may already have
+          # downloaded. Re-pushing a release branch is an easy accident;
+          # silently rewriting v1.0.0 underneath someone is not recoverable.
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists. Bump the version rather" >&2
+            echo "than republishing one that is already public." >&2
             exit 1
           fi
 
