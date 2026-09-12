@@ -81,34 +81,46 @@ jobs:
             exit 1
           fi
 
-          # A PKCS12 keystore is DER, which always opens 0x30 0x82. Checking
-          # that first means genuinely corrupt input is reported as corrupt
-          # input, rather than as the password failure it would look like
-          # after decoding to a few stray bytes.
-          if [ "$(head -c2 "$RUNNER_TEMP/release.jks" | od -An -tx1 | tr -d ' \n')" != "3082" ]; then
-            echo "KEYSTORE_BASE64 decoded, but the result is not a keystore." >&2
-            echo "Re-encode truckscan-release.jks and paste it again - see" >&2
-            echo "docs/RELEASING.md." >&2
-            exit 1
-          fi
-
-          # Prove it is a keystore this password opens, holding this alias,
-          # before spending five minutes on a build that would fail anyway.
-          # A wrong password or a mistyped alias is otherwise reported deep
-          # inside Gradle, where the message is far less obvious.
+          # keytool is the authority on whether this is a usable keystore:
+          # it reads PKCS12 and JKS alike, and only succeeds if the password
+          # is right. Ask it first, and inspect the bytes only to explain a
+          # failure - an earlier version tested for PKCS12's DER magic up
+          # front and would have rejected a perfectly good JKS.
           if ! keytool -list -keystore "$RUNNER_TEMP/release.jks" \
                  -storepass:env KEYSTORE_PASSWORD >/dev/null 2>&1; then
-            echo "The keystore decoded, but KEYSTORE_PASSWORD does not open" >&2
-            echo "it. PKCS12 keystores use one password for both the store" >&2
-            echo "and the key, so KEYSTORE_PASSWORD and KEY_PASSWORD must" >&2
-            echo "hold the same value." >&2
+            MAGIC=$(head -c4 "$RUNNER_TEMP/release.jks" | od -An -tx1 | tr -d ' \n')
+            case "$MAGIC" in
+              3082*|feedfeed)
+                echo "This is a keystore, but KEYSTORE_PASSWORD does not open" >&2
+                echo "it. PKCS12 keystores use one password for both the" >&2
+                echo "store and the key, so KEYSTORE_PASSWORD and" >&2
+                echo "KEY_PASSWORD must hold the same value." >&2
+                ;;
+              *)
+                echo "KEYSTORE_BASE64 decoded, but not to a keystore." >&2
+                # Base64 of a keystore starts 'MII' (PKCS12) or '/u3+' (JKS),
+                # so seeing that here means the value was encoded twice -
+                # easily done by encoding the .b64 file rather than the .jks.
+                case "$(head -c4 "$RUNNER_TEMP/release.jks")" in
+                  MII*|/u3+)
+                    echo "It decoded to more base64, so it was encoded twice." >&2
+                    echo "Encode truckscan-release.jks itself, not the file" >&2
+                    echo "holding its base64." >&2
+                    ;;
+                  *)
+                    echo "Check you encoded truckscan-release.jks and not" >&2
+                    echo "some other file - see docs/RELEASING.md." >&2
+                    ;;
+                esac
+                ;;
+            esac
             exit 1
           fi
 
           if ! keytool -list -keystore "$RUNNER_TEMP/release.jks" \
                  -storepass:env KEYSTORE_PASSWORD \
                  -alias "$KEY_ALIAS" >/dev/null 2>&1; then
-            echo "The keystore opened, but holds no key called '$KEY_ALIAS'." >&2
+            echo "The keystore opened, but holds no key by that alias." >&2
             echo "KEY_ALIAS must match the -alias given to keytool." >&2
             exit 1
           fi
