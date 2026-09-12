@@ -55,13 +55,66 @@ jobs:
       - name: Materialise the signing keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
             echo "KEYSTORE_BASE64 is not set. Add the four signing secrets" >&2
-            echo "before tagging a release - see docs/RELEASING.md." >&2
+            echo "before releasing - see docs/RELEASING.md." >&2
             exit 1
           fi
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+          # Keep only the base64 alphabet before decoding. Encoded text picks
+          # up line wrapping, stray spaces, and - the one that actually bit us
+          # - UTF-16, which is what Windows PowerShell writes from > and
+          # Out-File. Every one of those decodes to the identical keystore
+          # once the noise is gone, and nothing incorrect can slip through:
+          # the keytool checks below have to pass afterwards.
+          printf '%s' "$KEYSTORE_BASE64" \
+            | tr -cd 'A-Za-z0-9+/=' \
+            | base64 -d > "$RUNNER_TEMP/release.jks" 2>/dev/null || true
+
+          if [ ! -s "$RUNNER_TEMP/release.jks" ]; then
+            echo "KEYSTORE_BASE64 is set but did not decode to anything." >&2
+            echo "Re-encode the keystore and paste it again - see" >&2
+            echo "docs/RELEASING.md." >&2
+            exit 1
+          fi
+
+          # A PKCS12 keystore is DER, which always opens 0x30 0x82. Checking
+          # that first means genuinely corrupt input is reported as corrupt
+          # input, rather than as the password failure it would look like
+          # after decoding to a few stray bytes.
+          if [ "$(head -c2 "$RUNNER_TEMP/release.jks" | od -An -tx1 | tr -d ' \n')" != "3082" ]; then
+            echo "KEYSTORE_BASE64 decoded, but the result is not a keystore." >&2
+            echo "Re-encode truckscan-release.jks and paste it again - see" >&2
+            echo "docs/RELEASING.md." >&2
+            exit 1
+          fi
+
+          # Prove it is a keystore this password opens, holding this alias,
+          # before spending five minutes on a build that would fail anyway.
+          # A wrong password or a mistyped alias is otherwise reported deep
+          # inside Gradle, where the message is far less obvious.
+          if ! keytool -list -keystore "$RUNNER_TEMP/release.jks" \
+                 -storepass:env KEYSTORE_PASSWORD >/dev/null 2>&1; then
+            echo "The keystore decoded, but KEYSTORE_PASSWORD does not open" >&2
+            echo "it. PKCS12 keystores use one password for both the store" >&2
+            echo "and the key, so KEYSTORE_PASSWORD and KEY_PASSWORD must" >&2
+            echo "hold the same value." >&2
+            exit 1
+          fi
+
+          if ! keytool -list -keystore "$RUNNER_TEMP/release.jks" \
+                 -storepass:env KEYSTORE_PASSWORD \
+                 -alias "$KEY_ALIAS" >/dev/null 2>&1; then
+            echo "The keystore opened, but holds no key called '$KEY_ALIAS'." >&2
+            echo "KEY_ALIAS must match the -alias given to keytool." >&2
+            exit 1
+          fi
+
+          echo "Keystore decoded and verified: opens with KEYSTORE_PASSWORD," >&2
+          echo "and contains the key '$KEY_ALIAS'." >&2
 
       - name: Build signed release APK
         env:

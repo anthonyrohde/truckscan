@@ -62,6 +62,13 @@ lying around to forget about:
     [Convert]::ToBase64String([IO.File]::ReadAllBytes("truckscan-release.jks")) `
       | Set-Clipboard
 
+Use `Set-Clipboard` rather than redirecting to a file with `>` or `Out-File`.
+Windows PowerShell writes those as UTF-16, and UTF-16 base64 is not valid
+base64 — the release job used to fail on it with nothing more helpful than
+`base64: invalid input`. It now strips anything outside the base64 alphabet
+before decoding, so a UTF-16 or BOM-prefixed paste recovers to a
+byte-identical keystore, but the clipboard route avoids the question.
+
 Then in the public repository: **Settings → Secrets and variables → Actions →
 New repository secret**, four times:
 
@@ -123,7 +130,21 @@ A release that already exists is never overwritten; the run fails instead.
 Re-pushing a release branch is an easy accident, and silently replacing an APK
 people have already downloaded is not something you can take back.
 
-The workflow verifies the APK is actually signed, with
+### What the job checks before it builds
+
+A five-minute build that fails at the last step because a secret was pasted
+wrongly is a bad trade, so the keystore is validated up front. In order, the
+run will tell you if:
+
+- `KEYSTORE_BASE64` is missing, or decodes to nothing;
+- what it decodes to is not a keystore at all;
+- `KEYSTORE_PASSWORD` does not open the keystore — remember PKCS12 allows
+  only one password, so this and `KEY_PASSWORD` must match;
+- the keystore holds no key named `KEY_ALIAS`.
+
+Each of those is a distinct message naming the secret at fault.
+
+The workflow then verifies the finished APK is actually signed, with
 `apksigner verify --print-certs`, before publishing it. An unsigned or
 debug-signed APK fails the run instead of reaching a release page — the
 failure mode this whole document exists to prevent.
