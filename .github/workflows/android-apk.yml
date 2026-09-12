@@ -71,9 +71,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release view truckscan-debug >/dev/null 2>&1 || \
-            gh release create truckscan-debug \
-              --prerelease \
-              --title "Truck Scan - latest debug build" \
-              --notes "Debug APK for the F-250 OBD-II diagnostic app, built automatically from the latest commit. Unsigned debug build, so Android will warn about an unknown source."
+            gh release create truckscan-debug --prerelease \
+              --title "Truck Scan - latest debug build"
+          # Notes are set on every run, not just at creation, so this stays
+          # accurate as the project changes - gh release create is a no-op
+          # once the release exists.
+          gh release edit truckscan-debug --prerelease \
+            --title "Truck Scan - latest debug build" \
+            --notes-file - <<'NOTES'
+          **This is not the build to install.** It is rebuilt automatically from
+          every commit, signed with a throwaway debug key that differs between
+          builds, which means Android will refuse to update one over another.
+
+          For a build that installs and updates cleanly, use the latest
+          [release](../../releases/latest).
+
+          This one exists for testing a change before it is released.
+          NOTES
           gh release upload truckscan-debug \
             app/build/outputs/apk/debug/app-debug.apk --clobber

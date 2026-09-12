@@ -70,7 +70,35 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "truckscan-${VERSION}.apk"
           gh release create "$VERSION" "truckscan-${VERSION}.apk" \
             --title "Truck Scan $VERSION" \
-            --notes "Signed release build. Install on any Android 8.0 or newer phone. Android will warn about an unknown source because the app is not distributed through the Play Store."
+            --notes-file - <<'NOTES'
+          Signed release build. Requires Android 8.0 or newer.
+
+          ## Installing
+
+          1. Tap the `.apk` file in the Assets list below to download it.
+          2. Android will block the install and offer a settings toggle called
+             **Install unknown apps** - grant it to whatever app is doing the
+             downloading (usually Chrome or Files), go back, tap the file again.
+          3. Play Protect will note the app was not scanned. That is about where
+             the app came from, not what is in it: anything outside the Play
+             Store gets the same warning.
+
+          If you previously installed a `truckscan-debug` build, **uninstall it
+          first**. Debug builds are signed with a different key and Android will
+          not update across keys.
+
+          ## What it does
+
+          Reads your truck. Module discovery across all four CAN buses, fault
+          codes with Ford failure types, live data with warning thresholds for
+          things like coolant temperature, and As-Built configuration backup.
+
+          It does not write to any module. See the README for why, and for which
+          adapter you need - a generic ELM327 clone reaches only the engine and
+          transmission and will make the truck look like it has nothing else.
+
+          Built for a 2022 F-250 Super Duty. No warranty; see LICENSE.
+          NOTES
 
       - name: Remove the keystore
         if: always()
