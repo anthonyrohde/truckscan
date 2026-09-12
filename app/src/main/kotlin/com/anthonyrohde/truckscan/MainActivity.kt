@@ -104,7 +104,7 @@ private enum class Secondary(
         // Named for the term people actually search for. "Module
         // configuration" is more descriptive and completely unfindable.
         "asbuilt", "As-Built",
-        "Read, back up, edit and write module configuration",
+        "Read and back up module configuration",
         Icons.Filled.Settings,
     ),
     ROUTINES(
@@ -236,8 +236,8 @@ private fun MoreScreen(navController: NavHostController) {
         }
         item {
             Explanation(
-                "Module configuration and service functions need a connected adapter " +
-                    "and a completed module scan.",
+                "As-Built and service functions need a connected adapter and a " +
+                    "completed module scan.",
             )
         }
     }
