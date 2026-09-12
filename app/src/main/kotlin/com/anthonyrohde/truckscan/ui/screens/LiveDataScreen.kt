@@ -17,10 +17,15 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -69,6 +74,18 @@ fun LiveDataScreen(viewModel: ScanViewModel) {
 
     val watched = available.filter { it.key in selected }
 
+    if (showPicker) {
+        ParameterPicker(
+            available = available,
+            selected = selected,
+            sweepMillis = sample?.sweepMillis,
+            onToggle = viewModel::togglePid,
+            onDefaults = { viewModel.selectOnly(PidCatalog.DEFAULT_SELECTION) },
+            onSelectAll = { viewModel.selectOnly(available.map { it.key }) },
+            onDismiss = { showPicker = false },
+        )
+    }
+
     LazyVerticalGrid(
         // Adaptive rather than a fixed column count: this screen is used on a
         // phone in portrait, on a phone mounted sideways by the console, and on
@@ -91,8 +108,8 @@ fun LiveDataScreen(viewModel: ScanViewModel) {
                 Button(onClick = { viewModel.startLiveData() }) { Text("Start") }
                 OutlinedButton(onClick = { viewModel.stopLiveData() }) { Text("Stop") }
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { showPicker = !showPicker }) {
-                    Text(if (showPicker) "Hide list" else "Choose (${watched.size})")
+                TextButton(onClick = { showPicker = true }) {
+                    Text("Choose (${watched.size})")
                 }
             }
         }
@@ -121,40 +138,6 @@ fun LiveDataScreen(viewModel: ScanViewModel) {
             }
         }) { pid ->
             GaugeCard(pid = pid, value = sample?.values?.get(pid.key))
-        }
-
-        if (showPicker) {
-            item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Parameters") }
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                Column {
-                    Explanation(
-                        "Each PID is one request, so fewer parameters refresh faster. " +
-                            "Parameters carrying several sensors - the exhaust gas " +
-                            "temperatures - cost a single request between them." +
-                            (sample?.let { "\nLast sweep: ${it.sweepMillis} ms." } ?: ""),
-                    )
-                    Row(
-                        Modifier.padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        TextButton(onClick = {
-                            viewModel.selectOnly(PidCatalog.DEFAULT_SELECTION)
-                        }) { Text("Default set") }
-                        TextButton(onClick = {
-                            viewModel.selectOnly(available.map { it.key })
-                        }) { Text("Select all") }
-                    }
-                }
-            }
-            items(available, key = { "pick-" + it.key }, span = { GridItemSpan(maxLineSpan) }) { pid ->
-                Row(Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
-                    FilterChip(
-                        selected = pid.key in selected,
-                        onClick = { viewModel.togglePid(pid.key) },
-                        label = { Text("${pid.name}  (${pid.hexId})") },
-                    )
-                }
-            }
         }
 
         item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(24.dp)) }
@@ -284,4 +267,74 @@ private fun KeepScreenOn(enabled: Boolean) {
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
+}
+
+
+/**
+ * Parameter selection, as a dialog rather than a section under the gauges.
+ *
+ * Forty-five parameters appended below the dashboard would mean scrolling past
+ * every gauge to reach the list, and scrolling back to see the result. A dialog
+ * keeps the dashboard where it is and scrolls its own list, which also means
+ * the gauge grid never has to compete with a second scrolling region.
+ */
+@Composable
+private fun ParameterPicker(
+    available: List<Pid>,
+    selected: Set<String>,
+    sweepMillis: Long?,
+    onToggle: (String) -> Unit,
+    onDefaults: () -> Unit,
+    onSelectAll: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Parameters (${selected.size} selected)") },
+        text = {
+            Column {
+                Text(
+                    "Each PID is one request, so fewer parameters refresh faster. " +
+                        "Parameters carrying several sensors - the exhaust gas " +
+                        "temperatures - cost a single request between them." +
+                        (sweepMillis?.let { "\nLast sweep: $it ms." } ?: ""),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = onDefaults) { Text("Default set") }
+                    TextButton(onClick = onSelectAll) { Text("All") }
+                }
+                Spacer(Modifier.height(4.dp))
+                LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                    items(available, key = { it.key }) { pid ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { onToggle(pid.key) }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Checkbox(
+                                checked = pid.key in selected,
+                                onCheckedChange = { onToggle(pid.key) },
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(pid.name, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "PID ${pid.hexId}" +
+                                        if (pid.unit.isNotEmpty()) "  ${pid.unit}" else "",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
 }

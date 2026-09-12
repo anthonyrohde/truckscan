@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -187,7 +188,11 @@ private fun AppRoot() {
             }
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        // NavHost fills the scaffold body directly rather than sitting inside a
+        // Column: nested in one it can be measured to wrap its content, which
+        // leaves a lazy grid inside it with no bounded height and therefore
+        // nothing to scroll.
+        Box(Modifier.fillMaxSize().padding(padding)) {
             NavHost(navController, startDestination = Primary.CONNECT.route) {
                 composable(Primary.CONNECT.route) { ConnectScreen(viewModel) }
                 composable(Primary.MODULES.route) { ModulesScreen(viewModel) }
