@@ -1,0 +1,65 @@
+name: Build debug APK
+
+# Builds an installable APK on GitHub's runners, so the app can be put on a
+# phone without access to the machine it was developed on. The result is
+# published two ways: as a run artifact, and as a rolling prerelease whose
+# asset is a direct .apk link - which is the one that matters on a phone, since
+# a browser can tap straight through to the installer rather than downloading a
+# zip and hunting for an extractor.
+on:
+  push:
+    branches: ["claude/f250-obd2-diagnostic-app-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      # compileSdk 35 with matching build tools. Installed explicitly rather
+      # than relying on whatever the runner image ships, so a runner image
+      # update cannot silently change what the app is built against.
+      - name: Install SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Run the protocol tests first. An APK that assembles from a core with
+      # failing tests is worse than no APK, because it looks fine.
+      - name: Core protocol tests
+        run: ./gradlew :core:test
+
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug
+
+      - name: Upload as run artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      # A rolling prerelease at a fixed tag, so the download URL never changes
+      # and can be bookmarked on the phone.
+      - name: Publish to the rolling debug release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view debug-latest >/dev/null 2>&1 || \
+            gh release create debug-latest \
+              --prerelease \
+              --title "Latest debug build" \
+              --notes "Debug APK built automatically from the latest commit on this branch. Unsigned debug build - Android will warn about installing from an unknown source."
+          gh release upload debug-latest \
+            app/build/outputs/apk/debug/app-debug.apk --clobber
