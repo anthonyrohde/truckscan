@@ -72,7 +72,7 @@ Profiles are saved as plain text, the same reasoning as As-Built backups: a
 profile is useful beyond one phone, since the identifier map for a 2022 Super
 Duty BCM is the same on every 2022 Super Duty BCM.
 
-    # f250scan learned profile v1
+    # truckscan learned profile v1
     # source: bcm-capture.txt
     module 726 72E
       checksum TWOS_COMPLEMENT

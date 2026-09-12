@@ -62,10 +62,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view f250scan-debug >/dev/null 2>&1 || \
-            gh release create f250scan-debug \
+          gh release view truckscan-debug >/dev/null 2>&1 || \
+            gh release create truckscan-debug \
               --prerelease \
-              --title "SuperDuty Scan - latest debug build" \
+              --title "Truck Scan - latest debug build" \
               --notes "Debug APK for the F-250 OBD-II diagnostic app, built automatically from the latest commit. Unsigned debug build, so Android will warn about an unknown source."
-          gh release upload f250scan-debug \
+          gh release upload truckscan-debug \
             app/build/outputs/apk/debug/app-debug.apk --clobber

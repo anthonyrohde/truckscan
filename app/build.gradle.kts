@@ -9,11 +9,11 @@ plugins {
 }
 
 android {
-    namespace = "com.anthonyrohde.f250scan"
+    namespace = "com.anthonyrohde.truckscan"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.anthonyrohde.f250scan"
+        applicationId = "com.anthonyrohde.truckscan"
         // API 26 covers every phone that can realistically be used in a truck
         // and avoids the pre-Oreo Bluetooth quirks entirely.
         minSdk = 26

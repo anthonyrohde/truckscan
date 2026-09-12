@@ -1,4 +1,4 @@
-# SuperDuty Scan
+# Truck Scan
 
 An Android diagnostic app for a 2022 Ford F-250 Super Duty, in the spirit of
 FORScan: multi-bus module discovery, per-module fault codes, live data, and

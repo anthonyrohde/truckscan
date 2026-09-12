@@ -22,7 +22,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "f250scan"
+rootProject.name = "truckscan"
 
 // The :core module is pure Kotlin/JVM and carries every protocol layer
 // (ISO-TP, UDS, DTC decoding, As-Built framing). It builds and tests with
