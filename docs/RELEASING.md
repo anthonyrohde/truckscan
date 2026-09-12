@@ -99,6 +99,15 @@ act rather than something that happens on every commit. The rolling
 4. When it finishes, the release appears under **Releases** with
    `truckscan-v0.2.0.apk` attached.
 
+### If you cannot push a tag
+
+Some credentials are allowed to push branches and refused on `refs/tags`.
+The same workflow can be started by hand instead: **Actions → Build signed
+release APK → Run workflow**, with the version in the box (`v1.0.0`). It
+creates the tag against the commit it builds, so the result is identical to
+a tag push. The input is checked against a version pattern first — a typo
+there would otherwise become a permanent public tag.
+
 The workflow verifies the APK is actually signed, with
 `apksigner verify --print-certs`, before publishing it. An unsigned or
 debug-signed APK fails the run instead of reaching a release page — the
