@@ -33,9 +33,9 @@ data class AsBuiltScanProgress(
  * in the data it returns is not documented either, so [snapshot] tries both
  * readings and keeps whichever produces checksums that a single algorithm can
  * reproduce across every block. If neither does, the snapshot records no
- * strategy and [AsBuiltWriter] will refuse to write - which is the correct
- * outcome, because a block written with a wrong checksum is how a module gets
- * rejected.
+ * strategy, and says so. That does not diminish the backup, which is a
+ * faithful copy of whatever the module returned; the algorithm only matters to
+ * whatever writes a block back, which is not this app.
  */
 class AsBuiltReader(
     private val channel: IsoTpChannel,
