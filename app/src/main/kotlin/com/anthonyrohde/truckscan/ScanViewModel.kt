@@ -9,6 +9,8 @@ import com.anthonyrohde.truckscan.core.pid.Pid
 import com.anthonyrohde.truckscan.core.pid.PidCatalog
 import com.anthonyrohde.truckscan.core.pid.PidValue
 import com.anthonyrohde.truckscan.core.session.LiveRecording
+import com.anthonyrohde.truckscan.core.cluster.Cluster
+import com.anthonyrohde.truckscan.core.pid.MeasuredSupport
 import com.anthonyrohde.truckscan.core.probe.ProbeLibrary
 import com.anthonyrohde.truckscan.core.vehicle.BatteryVoltage
 import com.anthonyrohde.truckscan.core.probe.ProbeRunner
@@ -440,6 +442,48 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         // Stale alerts are worse than none: a warning left on screen after
         // polling stopped implies the condition is still being watched.
         _alerts.value = emptyList()
+    }
+
+    // ------------------------------------------------------------- cluster
+
+    /**
+     * Starts polling exactly what the dash cluster draws.
+     *
+     * The cluster asks for a fixed short list rather than whatever happens to
+     * be ticked on the live screen, because a dial with no source is worse than
+     * no dial: it sits blank and looks broken. Twelve parameters also sweep far
+     * faster than forty, which is what a needle needs to move smoothly.
+     */
+    fun startCluster() {
+        val wanted = Cluster.requiredKeys().toSet()
+        val offered = _availablePids.value.map { it.key }.toSet()
+        val usable = wanted intersect offered
+        if (usable.isEmpty()) {
+            _message.value = "None of the cluster's parameters are available on this vehicle."
+            return
+        }
+        _selectedPids.value = usable
+        startLiveData()
+    }
+
+    /**
+     * Turns the latest sweep into dial readings.
+     *
+     * The supported set comes from what this vehicle answered when asked, not
+     * from the recorded 2022 F-250, so the cluster marks a dial unavailable on
+     * the truck in front of it rather than on the one in the test fixture.
+     */
+    fun clusterReadings(sample: LiveDataSample?): List<Cluster.Reading> {
+        val supported = _availablePids.value.map { it.id }.toSet()
+            .ifEmpty { MeasuredSupport.SUPER_DUTY_2022_PCM_DATA }
+        return Cluster.readAll(sample?.values ?: emptyMap(), supported)
+    }
+
+    /** One panel number, resolved the same way the dials are. */
+    fun clusterReadout(readout: Cluster.Readout, sample: LiveDataSample?): String {
+        val key = (readout.source as? Cluster.Source.Single)?.key ?: return "--"
+        val value = sample?.values?.get(key)?.value ?: return "--"
+        return Cluster.format(value, readout.decimals)
     }
 
     val isStreaming: Boolean get() = liveDataJob?.isActive == true

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Link
@@ -52,6 +53,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.anthonyrohde.truckscan.ui.screens.AsBuiltScreen
+import com.anthonyrohde.truckscan.ui.screens.ClusterScreen
 import com.anthonyrohde.truckscan.ui.screens.ConnectScreen
 import com.anthonyrohde.truckscan.ui.screens.Explanation
 import com.anthonyrohde.truckscan.ui.screens.FaultsScreen
@@ -138,6 +140,11 @@ private enum class Secondary(
         "Run read-only adapter commands and record what comes back",
         Icons.Filled.Science,
     ),
+    CLUSTER(
+        "cluster", "Dash cluster",
+        "Full-screen gauges for a tablet mounted in the truck",
+        Icons.Filled.Dashboard,
+    ),
 }
 
 @Composable
@@ -223,6 +230,7 @@ private fun AppRoot() {
                 composable(Secondary.IMPORT.route) { ImportScreen(viewModel) }
                 composable(Secondary.LOG.route) { LogScreen(viewModel) }
                 composable(Secondary.PROBE.route) { ProbeScreen(viewModel) }
+                composable(Secondary.CLUSTER.route) { ClusterScreen(viewModel) }
             }
         }
     }

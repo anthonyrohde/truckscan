@@ -86,6 +86,18 @@ data class Pid(
     val shortName: String = name,
     /** True when the value is a count or duration rather than a measurement. */
     val isCounter: Boolean = false,
+    /**
+     * False when the scaling in [decoder] has never been checked against a
+     * vehicle that answers this PID.
+     *
+     * The legislated PIDs are single bytes with scalings that have not changed
+     * since 1996. The manufacturer-extended ones are multi-byte structures
+     * whose layout is documented inconsistently, and a wrong divisor produces a
+     * plausible number rather than an error - the worst kind of wrong for a
+     * gauge. A false here is not a reason to hide the reading; it is a reason
+     * to say, on the gauge, that it has not been confirmed.
+     */
+    val decodeVerified: Boolean = true,
     private val decoder: (ByteArray) -> Double,
 ) {
     val hexId: String get() = id.toString(16).uppercase().padStart(2, '0')

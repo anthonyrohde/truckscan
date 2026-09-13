@@ -221,6 +221,43 @@ object PidCatalog {
         decoder = byteAt(0),
     )
 
+    /**
+     * The manifold pressure this engine actually answers.
+     *
+     * PID 0x0B is the classic one-byte manifold pressure and a 2022 Super Duty
+     * does not support it. 0x87 does: five bytes, the first a bitmap of which
+     * of the two sensors are present, then two 16-bit readings scaled by 1/32
+     * of a kPa.
+     *
+     * UNVERIFIED. The layout is from the standard, not from this truck. It is
+     * checkable in one reading: with the engine off, manifold pressure is
+     * ambient, so this should agree with barometric pressure (PID 0x33) to
+     * within a couple of kPa. If it reads 3200 or 3.1, the divisor is wrong.
+     */
+    val INTAKE_MAP_EXTENDED = Pid(
+        key = "map_ext", id = 0x87, name = "Intake manifold absolute pressure",
+        shortName = "Manifold", unit = "kPa", byteCount = 3,
+        minValue = 0.0, maxValue = 500.0, decimals = 0, decodeVerified = false,
+        decoder = { ((it.u8(1) shl 8) or it.u8(2)) / 32.0 },
+    )
+
+    /**
+     * Distance travelled, straight from the module.
+     *
+     * UNVERIFIED, but verifiable exactly: the cluster in this truck read
+     * 35707.4 km, so a correct decode returns that and a wrong divisor returns
+     * 357074 or 3570.74. Four bytes, tenths of a kilometre.
+     */
+    val ODOMETER = Pid(
+        key = "odometer", id = 0xA6, name = "Odometer", shortName = "Odometer",
+        unit = "km", byteCount = 4, minValue = 0.0, maxValue = 1_000_000.0,
+        decimals = 1, isCounter = true, decodeVerified = false,
+        decoder = {
+            (((it.u8(0).toLong() shl 24) or (it.u8(1).toLong() shl 16) or
+                (it.u8(2).toLong() shl 8) or it.u8(3).toLong()) / 10.0)
+        },
+    )
+
     val BAROMETRIC_PRESSURE = Pid(
         key = "baro", id = 0x33, name = "Barometric pressure", shortName = "Baro",
         unit = "kPa", byteCount = 1, minValue = 0.0, maxValue = 120.0, decimals = 0,
@@ -413,6 +450,7 @@ object PidCatalog {
         INJECTION_TIMING, TIMING_ADVANCE, SHORT_TRIM_1, LONG_TRIM_1,
         MAF_RATE, CHARGE_AIR_TEMP, INTAKE_AIR_TEMP, AMBIENT_AIR_TEMP,
         BAROMETRIC_PRESSURE, EXHAUST_PRESSURE, EGR_TEMP,
+        INTAKE_MAP_EXTENDED, ODOMETER,
         COMMANDED_EGR, EGR_ERROR,
         DEMANDED_TORQUE, ACTUAL_TORQUE, REFERENCE_TORQUE,
         RUN_TIME, DISTANCE_WITH_MIL, DISTANCE_SINCE_CLEAR,
