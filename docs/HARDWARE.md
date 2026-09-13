@@ -25,44 +25,104 @@ rather than where it was expected.
 
 ## What a 2022 F-250 actually answered
 
-The table above is Ford's documented usage. These are measurements from one
-truck, with an OBDLink EX reporting `STN2231 v5.8.1`, ignition on.
+The table above is Ford's documented usage. Below is measurement, from one truck
+with an OBDLink EX (`STI` = `STN2231 v5.8.1`, `STDI` = `OBDLink EX r2.2.1`,
+serial 223110082390), VIN beginning `1FT8W2BT8N`, engine running.
 
-**HS-CAN1 and HS-CAN2 work.** The PCM answers on 7E8. A multi-bus scan reached
-the PAM on 736 and the APIM on 7D0 **on HS-CAN2 at 500 kbps** - both of which sit
-on MS-CAN on older Fords. Live data runs at a 240 ms median sweep with a 100%
-fill rate.
+### The adapter's protocol table
 
-**Nothing can be overheard.** With the PCM answering a request 150 ms earlier,
-`ATMA`, `STM` and `STMA` all returned `STOPPED`, with and without a receive
-filter. The likeliest reason is the gateway these trucks put in front of the OBD
-port: it routes diagnostic traffic on request rather than mirroring the internal
-buses. So bus discovery cannot be replaced by listening - the address sweep is
-the only way to find a module.
+Read off the chip itself by offering every number to `STP` and asking `STPRS`
+what it is. `STP` sets a protocol without opening it, so the sweep touches no
+bus.
 
-**No MS-CAN candidate has ever worked.** Every one returns `CAN ERROR`, meaning
-no node acknowledged the frame: the adapter's own `STP 33` with `STPBR 125000`
-(`STPBRR` read back `125000`, so the bitrate took), and ELM327 protocol B with
-options bytes C0, 40, 01, 11 and 80, each against 726, 720 and 7D0. Not one
-`NO DATA`.
+| `STP` | Reported name | Pins |
+|-------|---------------|------|
+| 21-25 | ISO 9141 / ISO 14230 variants | 7/15 |
+| 31, 32 | HS CAN (ISO 11898, 500K, 11B/29B) | 6/14 |
+| 33, 34 | HS CAN (ISO 15765, 500K, 11B/29B) | 6/14 |
+| 35, 36 | HS CAN (ISO 15765, 250K, 11B/29B) | 6/14 |
+| 41, 42 | SAE J1939 (250K, 11B/29B) | 6/14 |
+| 51, 52 | MS CAN (ISO 11898, 125K, 11B/29B) | 3/11 |
+| 53, 54 | MS CAN (ISO 15765, 125K, 11B/29B) | 3/11 |
+| 61-64 | SW CAN (33K) | 1 |
 
-Two readings fit, and they have not been separated yet:
+There is no entry for pins 12/13 or 9. **HS-CAN2 and HS-CAN3 cannot be reached
+through the OBD connector at all**, by this adapter or any other that does not
+rewire it. Anything this app previously reported as found on HS-CAN2 was found
+on pins 6/14 — the bus selection for those two ran the identical `STP 33` as
+HS-CAN1 and scanned the powertrain bus again under another name.
 
-1. **This truck has no MS-CAN.** PAM and APIM answering on HS-CAN2 is consistent
-   with Ford having moved that traffic to a 500 kbps bus. If so, every MS-CAN
-   probe the app makes is wasted time on this vehicle.
-2. **The adapter was never on pins 3/11.** `ATPB` and `STPBR` set a CAN
-   controller's bitrate and options. Neither says anything about which wires the
-   transceiver is attached to. Six candidates may have been six ways of talking
-   to the wrong wires.
+### Opening a bus
 
-The probe console's **"Which protocols this adapter has"** investigation is what
-separates them: `STP` sets a protocol without opening it, so every protocol
-number can be offered to the chip and `STPRS` asked what it is called, without
-putting anything on a bus. If the adapter has a protocol it calls MS-CAN, that
-names the command; if it does not, reading 1 is the live one.
+Four ways, each from a clean reset, each asked the PCM for PID 00. **All four
+answered**: `ATSP6`; `STP 33` alone; `STP 33` + `STPO`; `STP 33` + `STPBR
+500000`. `STP` alone opens a protocol, so the bus init sends one command.
 
-Until that is settled, do not trust this document on MS-CAN.
+### MS-CAN is reachable, and empty
+
+With the engine running and the PCM answering seconds earlier in the same run,
+`STP 53` opened (`STPRS` confirming `MS CAN (ISO 15765, 125K/11B)`) and a
+TesterPresent to 726, 720, 733 and 7D0 returned `CAN ERROR` every time — no node
+acknowledged. Repeated with the protocol opened by `STPO` and again by `STPBR
+125000`. **This truck has nothing on pins 3/11.**
+
+An earlier run that looked like the same result was void: the truck had gone to
+sleep, and the control request at the end returned `NO DATA` rather than a
+reading. That is why every bus test now ends by asking the PCM something.
+
+### Nothing can be overheard
+
+With the PCM answering a request 150 ms earlier, `ATMA`, `STM` and `STMA` all
+returned `STOPPED`, with and without a receive filter. The gateway in front of
+the OBD port routes diagnostic traffic on request and does not mirror the
+internal buses, so discovery cannot be replaced by listening — the address sweep
+is the only way to find a module.
+
+### Multi-frame transfers, and a claim that turned out to be wrong
+
+Mode 09 PID 02 (VIN) and `22 F188` (part number) both came back correctly: a
+first frame, silence, then the consecutive frames released by our flow control.
+
+Two things were tested that this project had asserted without evidence:
+
+- **An AT command between the first frame and the flow control costs nothing.**
+  `ATCRA 7E8` was deliberately inserted mid-burst and the consecutive frames
+  still arrived. The claim that ELM firmware abandons reception to service a
+  command is not supported.
+- **`ATR0` around the flow control loses the burst.** Sent plainly, a flow
+  control returned both consecutive frames of the VIN in 58 ms. Behind `ATR0`,
+  the same flow control returned a bare prompt in 29 ms and no frames at all.
+  The suppression was not protecting the burst, it was hiding it. It has been
+  removed from the receive path.
+
+### Individual commands
+
+- `ATRV` works but is **not** a liveness test: it read 10.0 V on a truck whose
+  PCM was answering, and 11.7 V on one that was asleep. Only asking a module
+  something tells you the vehicle is awake.
+- `ATST` is confirmed: `ATST 05` gave up on a miss in 49 ms, `ATST FF` in
+  1069 ms — 255 × 4 ms, as documented.
+- `ATCAF` ambiguity is confirmed on hardware. `0103` with auto-formatting **on**
+  returned `7E8 03 7F 01 31` (mode 01 PID 03, request out of range); the same
+  four characters with it **off** returned `7E8 02 43 00` (mode 03, read stored
+  fault codes, none stored). One string, two services. This is why the probe
+  console refuses any frame that is dangerous under either reading.
+- `@1` returns `?` on this adapter; `STDI` is the command that names it. `STBR`
+  is a setter, not a query, and also returns `?`. `ATPPS` shows `0C:23`, which is
+  4,000,000/35 ≈ 114,286 — the link is at 115,200 and is configurable.
+- `ATCRA` made no observable difference here: with the filter cleared, only 7E8
+  replied anyway, consistent with the gateway not mirroring traffic.
+
+### What the PCM offers
+
+67 PIDs claimed across six bitmaps, 62 of them carrying a reading. Recorded
+verbatim in `MeasuredSupport`, including the raw bytes. Notably present: engine
+oil temperature (5C), fuel tank level (2F), boost pressure control (70),
+turbocharger inlet pressure (6F), exhaust gas temperature (78), DPF differential
+pressure (7A), control module voltage (42), ambient air temperature (46) and
+odometer (A6). Notably absent: manifold pressure (0B) and throttle position (11),
+and OBD-II carries no engine oil *pressure* at all, so a dash replica cannot show
+that gauge honestly.
 
 ## What to buy
 

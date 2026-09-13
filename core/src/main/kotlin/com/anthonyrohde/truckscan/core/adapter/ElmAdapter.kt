@@ -362,10 +362,17 @@ class ElmAdapter(
      * Turns the adapter's wait-for-response behaviour on or off (`ATR1`/`ATR0`).
      *
      * With responses on, the adapter sits waiting for the ATST timeout after
-     * every transmitted frame. When streaming the consecutive frames of a
-     * segmented request that costs 200 ms per frame for no benefit, so the
-     * ISO-TP layer switches responses off for the middle of a burst and back on
-     * for the frame whose reply it actually wants.
+     * every transmitted frame. When streaming the consecutive frames of a long
+     * *request* that costs time for no benefit, so the ISO-TP send path
+     * switches responses off for the middle of a burst and back on for the
+     * frame whose reply it actually wants.
+     *
+     * Do not reach for this on the receive path. Measured on an OBDLink EX
+     * against a running truck: a flow control sent plainly returned both
+     * consecutive frames of a VIN in 58 ms, and the same flow control behind
+     * `ATR0` returned a bare prompt and nothing else. There is no timeout there
+     * worth avoiding, and suppressing responses loses the burst rather than
+     * protecting it.
      */
     suspend fun setResponsesEnabled(enabled: Boolean) = mutex.withLock {
         rawCommand(if (enabled) "ATR1" else "ATR0")
@@ -373,16 +380,15 @@ class ElmAdapter(
     }
 
     /**
-     * Sends a raw frame without waiting for a reply, returning any frames that
-     * happened to arrive in the same read. Requires `ATR0`.
+     * Sends a raw frame and returns whatever arrives in the same read.
      *
-     * The read itself is not optional - the adapter emits a prompt even with
-     * ATR0, and leaving it buffered would corrupt the next reply. What is not
-     * optional either is keeping what comes with it: after a flow control
-     * frame the module starts sending immediately, and with a separation time
-     * of zero its first consecutive frames land inside this window. Discarding
-     * them, as this used to, loses the front of the message and the rest never
-     * adds up.
+     * The name is now half wrong and kept for the callers: it does not wait for
+     * a *reply to this frame*, but it does read, and what it reads matters. A
+     * flow control frame is the case that proves it - the module starts sending
+     * the moment it is granted, and with a separation time of zero the whole
+     * remainder of the message lands inside this window. On a running truck a
+     * 17-byte VIN came back complete in 58 ms this way. Discarding the read, as
+     * this used to, loses the message and the rest never adds up.
      */
     suspend fun sendFrameNoWait(data: ByteArray): List<CanFrame> = mutex.withLock {
         require(data.size <= 8) { "A CAN 2.0 frame carries at most 8 bytes, got ${data.size}" }

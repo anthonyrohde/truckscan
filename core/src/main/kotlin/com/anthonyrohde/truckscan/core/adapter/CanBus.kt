@@ -54,7 +54,19 @@ enum class CanBus(
         extendedAddressing = false, stnProtocol = 0x33,
     ),
 
-    /** Body/infotainment bus on most Fords: BCM, IPC, APIM, ACM, DSM. */
+    /**
+     * Body/infotainment bus on most Fords: BCM, IPC, APIM, ACM, DSM.
+     *
+     * Reachable, and on a 2022 F-250 Super Duty, empty. With the engine running
+     * and the PCM answering seconds earlier in the same run, protocol 53 opened
+     * (`STPRS` reporting "MS CAN (ISO 15765, 125K/11B)") and a TesterPresent to
+     * 726, 720, 733 and 7D0 returned `CAN ERROR` every time - no node
+     * acknowledged, with the protocol opened by `STPO` and again by `STPBR`.
+     * Ford appears to have moved this traffic elsewhere on this platform.
+     *
+     * Left in place because it is correct for other Fords and because the
+     * negative is worth being able to reproduce.
+     */
     MS_CAN(
         "MS-CAN", canHighPin = 3, canLowPin = 11, bitrateBps = 125_000,
         extendedAddressing = false, stnProtocol = 0x53,

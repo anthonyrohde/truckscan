@@ -247,17 +247,10 @@ class IsoTpChannel(
     private suspend fun reassemble(initial: List<CanFrame>, timeoutMillis: Long): ByteArray {
         val assembler = IsoTpAssembler()
         val queue = ArrayDeque(initial)
-        var flowControlSent = false
 
         try {
-            return reassembleLoop(assembler, queue, timeoutMillis) { flowControlSent = true }
+            return reassembleLoop(assembler, queue, timeoutMillis) { }
         } finally {
-            // Responses stay suppressed from the moment flow control goes out
-            // until the message is complete. Restoring them any earlier sends
-            // an AT command into the middle of the consecutive-frame burst,
-            // and ELM-family firmware interrupts reception to service it - the
-            // frames are gone before anything reads them.
-            if (flowControlSent) adapter.setResponsesEnabled(true)
             // Whatever is left belongs to the next message.
             carried.addAll(queue)
         }
@@ -336,17 +329,33 @@ class IsoTpChannel(
         }
     }
 
+    /**
+     * Grants the module the rest of the transfer, and returns whatever it sends
+     * back in the same read - which is normally the whole remainder.
+     *
+     * This used to wrap the flow control in `ATR0`/`ATR1` on the reasoning that
+     * the adapter would otherwise sit out the ATST timeout waiting for a reply
+     * to a frame that has none, and that restoring responses mid-burst would
+     * make the firmware service the AT command instead of the bus and lose the
+     * consecutive frames. Both halves were measured on an OBDLink EX against a
+     * running 2022 F-250, and both were wrong:
+     *
+     *   - Sent plainly, a flow control for a 17-byte VIN returned both
+     *     consecutive frames in 58 ms. There is no timeout to avoid.
+     *   - With `ATR0` in front of it, the same flow control returned a bare
+     *     prompt in 29 ms and no frames at all.
+     *   - An `ATCRA` deliberately inserted between the first frame and the
+     *     flow control cost nothing: the consecutive frames still arrived.
+     *
+     * So the suppression this code was built around was not protecting the
+     * burst, it was hiding it. Send the frame and read the answer.
+     */
     private suspend fun sendFlowControl(): List<CanFrame> {
         val fc = IsoTpFrame.FlowControl(
             IsoTpFrame.FlowStatus.CONTINUE_TO_SEND,
             config.blockSize,
             config.separationTimeRaw,
         )
-        // Responses off, and left off: see the finally in reassemble. Turning
-        // them back on here was the bug that made every reply longer than
-        // seven bytes fail on the vehicle while passing against the simulator,
-        // which has no such firmware behaviour to reproduce.
-        adapter.setResponsesEnabled(false)
         return adapter.sendFrameNoWait(fc.encode(padTo, config.padByte))
     }
 

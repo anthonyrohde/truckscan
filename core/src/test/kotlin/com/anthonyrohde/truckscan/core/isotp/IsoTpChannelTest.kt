@@ -105,15 +105,22 @@ class IsoTpChannelTest {
     }
 
     /**
-     * After flow control goes out the module streams consecutive frames
-     * immediately. Restoring ATR1 at that moment put an AT command into the
-     * middle of the burst, and ELM firmware services the command instead of
-     * the bus - the frames were gone before anything read them.
+     * The receive path must send nothing but the flow control frame.
      *
-     * The fix is an ordering guarantee, so that is what this asserts.
+     * This test used to assert the opposite of what it asserts now. It required
+     * an `ATR0` before the flow control and an `ATR1` after the last
+     * consecutive frame, on a theory about ELM firmware abandoning a burst to
+     * service an AT command. Measured on an OBDLink EX against a running 2022
+     * F-250, the theory was wrong twice over: a flow control sent plainly
+     * returned both consecutive frames of a VIN in 58 ms, the same flow control
+     * behind `ATR0` returned a bare prompt and no frames at all, and an `ATCRA`
+     * deliberately inserted mid-burst cost nothing.
+     *
+     * A test that encodes a guess will defend that guess against the hardware.
+     * This one now says only what was seen.
      */
     @Test
-    fun `no command is sent between flow control and the consecutive frames`() = runBlocking {
+    fun `the receive path sends the flow control and nothing else`() = runBlocking {
         val transport = ScriptedTransport { cmd ->
             when {
                 cmd.startsWith("0322F190") -> listOf("7E81009620F1901020304")
@@ -125,22 +132,24 @@ class IsoTpChannelTest {
 
         runCatching { ch.request(0x7E0, 0x7E8, byteArrayOf(0x22, 0xF1.toByte(), 0x90.toByte())) }
 
-        val fc = t.events.indexOfFirst { it.startsWith("W:3000") }
-        val consecutive = t.events.indexOfFirst { it.startsWith("R:") && it.contains("7E821") }
-        val restore = t.events.indexOfFirst { it == "W:ATR1" }
-
+        val fc = t.written.indexOfFirst { it.startsWith("3000") }
         assertTrue(fc >= 0, "flow control should have been sent: ${t.events}")
-        assertTrue(consecutive > fc, "consecutive frames should follow flow control: ${t.events}")
+
+        val after = t.written.drop(fc + 1)
         assertTrue(
-            restore > consecutive,
-            "ATR1 was restored before the consecutive frames were read, which is " +
-                "the command that landed mid-burst on the vehicle: ${t.events}",
+            after.none { it.startsWith("AT") || it.startsWith("ST") },
+            "nothing may be sent after the flow control while the burst is arriving, " +
+                "and the adapter must not be left in a suppressed state: ${t.events}",
+        )
+        assertTrue(
+            t.written.none { it == "ATR0" || it == "ATR1" },
+            "the receive path must not touch ATR0/ATR1 at all: ${t.events}",
         )
     }
 
-    /** Responses must be re-enabled once the message is in, not left off. */
+    /** The frames that arrive with the flow control are the message, not noise. */
     @Test
-    fun `responses are restored after reassembly finishes`() = runBlocking {
+    fun `frames arriving alongside the flow control are kept`() = runBlocking {
         val transport = ScriptedTransport { cmd ->
             when {
                 cmd.startsWith("0322F190") -> listOf("7E81009620F1901020304")
@@ -148,14 +157,17 @@ class IsoTpChannelTest {
                 else -> listOf("NO DATA")
             }
         }
-        val (ch, t) = channel(transport)
+        val (ch, _) = channel(transport)
 
-        runCatching { ch.request(0x7E0, 0x7E8, byteArrayOf(0x22, 0xF1.toByte(), 0x90.toByte())) }
+        val reply = ch.request(0x7E0, 0x7E8, byteArrayOf(0x22, 0xF1.toByte(), 0x90.toByte()))
 
-        val fcIndex = t.written.indexOfFirst { it.startsWith("3000") }
-        assertTrue(
-            t.written.drop(fcIndex).any { it == "ATR1" },
-            "ATR1 must be restored after the message completes: ${t.events}",
+        // The first frame declares nine bytes and carries six of them; the
+        // rest arrived in the same read as the flow control. All nine are here,
+        // which is the whole point - that read used to be thrown away.
+        assertEquals(9, reply.size)
+        assertEquals(
+            "620F19010203050607",
+            reply.joinToString("") { "%02X".format(it) },
         )
     }
 }
