@@ -44,17 +44,19 @@ data class BusSelection(
     /**
      * True when free-running traffic was actually seen on the bus.
      *
-     * False means "none was seen", which is NOT the same as "the bus is
-     * asleep". Measured on a 2022 F-250: with the ignition on and a module
-     * answering a request 150 ms earlier, ATMA, STM and STMA all reported
-     * silence, with and without a receive filter. On a vehicle whose OBD port
-     * sits behind a gateway there is simply nothing to overhear - diagnostic
-     * traffic is routed on request and the internal buses are not mirrored.
+     * True means a module answered a request on this bus just now. False means
+     * none did, which is worth reporting and still is not a diagnosis - a bus
+     * with nothing on it and a bus whose modules are asleep look identical.
      *
-     * So a false here carries no information about the vehicle and must never
-     * be turned into advice about the ignition. It told the user to check a key
-     * that was already on, and sent the author of this code looking in the
-     * wrong place for an afternoon.
+     * This used to be the result of listening with `ATMA`, and in that form it
+     * carried no information at all. Measured on a 2022 F-250: with the
+     * ignition on and a module answering a request 150 ms earlier, `ATMA`,
+     * `STM` and `STMA` all reported silence, with and without a receive filter.
+     * The OBD port sits behind a gateway that routes diagnostic traffic on
+     * request and does not mirror the internal buses, so there is nothing to
+     * overhear. A false from that told the user to check a key that was already
+     * on, and sent the author of this code looking in the wrong place for an
+     * afternoon. It now comes from asking rather than listening.
      */
     val trafficObserved: Boolean,
 )
@@ -183,10 +185,12 @@ class ElmAdapter(
      * Configures the adapter for [bus], trying each candidate sequence until
      * one produces traffic.
      *
-     * A sequence that applies cleanly but sees no traffic is still accepted -
-     * with the key off, a body bus is genuinely silent, and refusing to
-     * proceed would make the app unusable in a garage. [BusSelection.trafficObserved]
-     * carries that distinction up to the UI.
+     * A sequence that applies cleanly but gets no answer is still accepted -
+     * with the key off every bus is genuinely silent, and refusing to proceed
+     * would make the app unusable in a garage. [BusSelection.trafficObserved]
+     * carries that distinction up to the UI, and now means something: it is the
+     * result of asking a module a question, not of listening to a monitor that
+     * reports silence on this vehicle whatever is happening.
      */
     suspend fun selectBus(bus: CanBus): BusSelection = mutex.withLock {
         if (bus != CanBus.HS_CAN1 && !identity.supportsMultiBus) {
@@ -265,35 +269,34 @@ class ElmAdapter(
     }
 
     /**
-     * Listens for any valid frame using the adapter's monitor-all mode.
+     * Asks whether anything on this bus will answer.
      *
-     * `ATMA` streams until interrupted by any character, so we always send the
-     * interrupt and drain, even on the failure path, or the next command would
-     * read monitor output instead of its own reply.
+     * This used to listen with `ATMA` and treat any frame as proof of life.
+     * That was measured on a 2022 F-250 to be worthless and possibly harmful:
+     * `ATMA`, `STM` and `STMA` all returned `STOPPED` with the PCM answering
+     * requests 150 ms earlier, so every bus looked silent - and leaving a
+     * monitor running, then interrupting and resynchronising it, sits directly
+     * in front of the first real request on a freshly selected bus.
+     *
+     * Sending one request instead is cheap and unambiguous. On the powertrain
+     * bus the broadcast address brought back two modules in 60 ms.
      */
     private suspend fun probeBusTraffic(durationMillis: Long = 400): Boolean {
-        writeLine("ATMA")
-        var sawFrame = false
-        val deadline = System.currentTimeMillis() + durationMillis
-        try {
-            while (System.currentTimeMillis() < deadline) {
-                val remaining = deadline - System.currentTimeMillis()
-                if (remaining <= 0) break
-                val chunk = transport.read(remaining.coerceAtMost(150))
-                if (chunk.isEmpty()) continue
-                buffer.append(String(chunk, Charsets.US_ASCII))
-                if (drainLines().any { CanFrame.parse(it, extendedAddressing) != null }) {
-                    sawFrame = true
-                    break
-                }
-            }
-        } finally {
-            // Interrupt the monitor and resynchronise on the prompt.
-            transport.write(byteArrayOf('\r'.code.toByte()))
-            runCatching { readUntilPrompt(1_000) }
-            buffer.clear()
+        val (txId, payload) = currentBus?.livenessProbe ?: return false
+
+        val header = txId.toString(16).uppercase().padStart(3, '0')
+        if (rawCommand("ATSH $header").status == AdapterResponse.Status.UNKNOWN_COMMAND) {
+            return false
         }
-        return sawFrame
+        // No receive filter: on this truck more than one module answers the
+        // broadcast, and filtering to one of them would throw away the
+        // evidence that the others are there.
+        rawCommand("ATCRA")
+
+        val frame = byteArrayOf(payload.size.toByte()) + payload +
+            ByteArray(7 - payload.size) { 0x00 }
+        val reply = rawCommand(frame.toHex(), durationMillis)
+        return reply.lines.any { CanFrame.parse(it, extendedAddressing) != null }
     }
 
     // -------------------------------------------------------------- addressing

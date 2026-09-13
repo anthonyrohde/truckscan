@@ -87,6 +87,26 @@ enum class CanBus(
 
     val isHighSpeed: Boolean get() = bitrateBps >= 500_000
 
+    /**
+     * A request that something on this bus should answer, used to tell a bus
+     * that is up from one that is merely configured.
+     *
+     * This replaces listening with `ATMA`, which on a 2022 F-250 reports
+     * silence even while a module is answering - the gateway routes diagnostic
+     * traffic on request rather than mirroring it, so there is nothing to
+     * overhear and the monitor could never distinguish a working bus from a
+     * broken one. Asking a question can.
+     *
+     * On the high speed buses that is the OBD-II broadcast address, measured to
+     * bring back replies from 7E8 and 7E9 in 60 ms. MS-CAN has no broadcast
+     * address, so it asks the body control module whether it is there.
+     */
+    val livenessProbe: Pair<Int, ByteArray>
+        get() = when (this) {
+            MS_CAN -> 0x726 to byteArrayOf(0x3E, 0x00)
+            else -> 0x7DF to byteArrayOf(0x01, 0x00)
+        }
+
     /** The protocol number to send, accounting for 11- vs 29-bit addressing. */
     val stnProtocolNumber: Int?
         get() = stnProtocol?.let { if (extendedAddressing) it + 1 else it }

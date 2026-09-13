@@ -70,6 +70,35 @@ An earlier run that looked like the same result was void: the truck had gone to
 sleep, and the control request at the end returned `NO DATA` rather than a
 reading. That is why every bus test now ends by asking the PCM something.
 
+### Which modules answer, and where
+
+Twenty Ford addresses probed with TesterPresent, receive filter cleared, engine
+running. Five answered, all on **HS-CAN1**:
+
+| Request | Reply | Module |
+|---------|-------|--------|
+| 7E0 | 7E8 | PCM |
+| 7E1 | 7E9 | TCM |
+| 726 | 72E | BCM |
+| 736 | 73E | PAM |
+| 7D0 | 7D8 | APIM |
+
+No reply from 7E2, 760, 706, 720, 724, 712, 733, 727, 740, 754, 730, 764, 765,
+775, 783. The response ID is the request plus 8 in every case.
+
+The BCM is the point: it answers on the powertrain bus, not on MS-CAN where it
+is documented to live. The gateway presents it there. A module answers in
+56-64 ms; an address with nothing on it costs 120-137 ms to rule out.
+
+The OBD-II broadcast address 7DF brings back both 7E8 and 7E9 to one request in
+60 ms, which is what bus liveness is now tested with.
+
+### 29-bit addressing is not used here
+
+`STP 34` opened `HS CAN (ISO 15765, 500K/29B)` and the standard 29-bit
+functional request to 18DB33F1 returned `NO DATA`. Everything on this truck is
+11-bit.
+
 ### Nothing can be overheard
 
 With the PCM answering a request 150 ms earlier, `ATMA`, `STM` and `STMA` all
