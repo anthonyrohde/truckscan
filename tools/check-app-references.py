@@ -101,6 +101,8 @@ def main() -> int:
                 f"unresolved core import '{match.group(1)}'"
             )
 
+    problems += undeclared_constants()
+
     if problems:
         print(f"{len(problems)} unresolved reference(s) in :app\n")
         for problem in problems:
@@ -109,6 +111,56 @@ def main() -> int:
 
     print(f"OK - {len(members)} view model members, all :app references resolve")
     return 0
+
+
+CONSTANT_USE = re.compile(r"\b([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b")
+CONSTANT_DECL = re.compile(
+    r"\b(?:const\s+)?val\s+([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b"
+)
+CONSTANT_QUALIFIED = re.compile(r"[.]([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b")
+
+
+def undeclared_constants():
+    """Flags SCREAMING_CASE names used in :app but declared nowhere.
+
+    This container cannot compile :app - Google's Maven is unreachable from it -
+    so a name that exists only in the author's head reaches CI and fails there.
+    That has happened three times now, most recently DIAGNOSTIC_LOG_LINES, and
+    each round costs a build.
+
+    Deliberately narrow. Only unqualified constants are considered: anything
+    written as Build.VERSION_CODES.Q or MediaStore.MediaColumns.IS_PENDING comes
+    from a library this check cannot see, and guessing about those would produce
+    noise that trains everyone to ignore the check. Enum constants used bare
+    inside a when are the one known false-positive shape, so anything declared
+    anywhere in :app or :core - in any form - counts as declared.
+    """
+    declared = set()
+    sources = list(APP.rglob("*.kt")) + list(CORE.rglob("*.kt"))
+    for path in sources:
+        text = path.read_text(encoding="utf-8")
+        declared.update(CONSTANT_DECL.findall(text))
+        # Enum entries and object members: any SCREAMING_CASE token that starts
+        # a line is a declaration, not a use.
+        for line in text.splitlines():
+            stripped = line.strip()
+            match = re.match(r"([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\s*[(,{:]", stripped)
+            if match:
+                declared.add(match.group(1))
+
+    found = []
+    for path in APP.rglob("*.kt"):
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            code = line.split("//")[0]
+            qualified = set(CONSTANT_QUALIFIED.findall(code))
+            for name in CONSTANT_USE.findall(code):
+                if name in qualified or name in declared:
+                    continue
+                found.append(
+                    f"{path.relative_to(ROOT)}:{line_number}: "
+                    f"'{name}' is not declared in :app or :core"
+                )
+    return found
 
 
 if __name__ == "__main__":

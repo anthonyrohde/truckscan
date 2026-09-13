@@ -616,4 +616,13 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
     }
 
+    private companion object {
+        /**
+         * Adapter log lines carried in the diagnostic report.
+         *
+         * Enough to show how a failure unfolded without turning the report
+         * into the log it exists to summarise.
+         */
+        const val DIAGNOSTIC_LOG_LINES = 400
+    }
 }
