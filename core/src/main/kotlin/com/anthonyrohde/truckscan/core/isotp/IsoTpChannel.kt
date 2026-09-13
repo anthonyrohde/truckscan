@@ -47,6 +47,19 @@ class IsoTpChannel(
     private val padTo: Int get() = if (config.padFrames) 8 else 0
 
     /**
+     * Frames that arrived with the previous message but belong to the next one.
+     *
+     * One adapter read routinely returns more than one CAN frame, and they are
+     * not always one message. A module answering 0x78 "response pending" and
+     * then immediately sending the real reply puts both in the same read: the
+     * single frame completes, and the first frame of what follows is still in
+     * hand. Dropping it deadlocks the exchange - the module waits for flow
+     * control that is never sent, because the receiver is waiting for a first
+     * frame it already threw away.
+     */
+    private val carried = ArrayDeque<CanFrame>()
+
+    /**
      * Sends [payload] to [txId] and returns the reassembled reply from [rxId].
      *
      * @param timeoutMillis how long to wait for the first reply frame. Callers
@@ -61,6 +74,10 @@ class IsoTpChannel(
     ): ByteArray {
         adapter.setTxHeader(txId)
         adapter.setRxFilter(rxId)
+
+        // A new request starts a new conversation; anything held over from the
+        // last one is stale and must not contaminate this reply.
+        carried.clear()
 
         val frames = IsoTpSegmenter.segment(payload)
         log("TX ${payload.toHex()} as ${frames.size} frame(s)")
@@ -82,7 +99,19 @@ class IsoTpChannel(
      */
     suspend fun receive(rxId: Int, timeoutMillis: Long): ByteArray {
         adapter.setRxFilter(rxId)
-        val frames = adapter.collectFrames(timeoutMillis)
+
+        // Frames held over from the previous message come first. When a module
+        // sends 0x78 and the real reply back to back, the reply's first frame
+        // is already here and reading the adapter again would wait for
+        // something that has already arrived.
+        val held = carried.toList()
+        carried.clear()
+
+        val frames = held + if (held.isEmpty()) {
+            adapter.collectFrames(timeoutMillis)
+        } else {
+            emptyList()
+        }
         if (frames.isEmpty()) {
             throw IsoTpException("Timed out waiting for a deferred response from the module.")
         }
@@ -146,10 +175,15 @@ class IsoTpChannel(
 
         // Stream everything but the final frame without waiting; the last one
         // carries the timeout we want to collect the actual response on.
+        // A module may start answering before we have finished asking. Frames
+        // that arrive while the request is still streaming are the front of
+        // that answer, and are carried to the reassembler rather than dropped.
+        val early = mutableListOf<CanFrame>()
+
         adapter.setResponsesEnabled(false)
         try {
             consecutive.dropLast(1).forEachIndexed { index, frame ->
-                adapter.sendFrameNoWait(frame.encode(padTo, config.padByte))
+                early += adapter.sendFrameNoWait(frame.encode(padTo, config.padByte))
                 if (gapMicros > 0) delay((gapMicros / 1000L).coerceAtLeast(1))
                 // Honour the receiver's block size: after every `blockSize`
                 // frames it expects to send us another flow control frame.
@@ -168,7 +202,13 @@ class IsoTpChannel(
             adapter.setResponsesEnabled(true)
         }
 
-        return sendAndCollect(consecutive.last(), timeoutMillis)
+        val (last, status) = adapter.sendFrameAndCollect(
+            consecutive.last().encode(padTo, config.padByte),
+            timeoutMillis,
+        )
+        val all = early + last
+        if (all.isEmpty()) throwForStatus(status)
+        return all
     }
 
     private suspend fun awaitFlowControl(first: IsoTpFrame): IsoTpFrame.FlowControl {
@@ -208,7 +248,30 @@ class IsoTpChannel(
         val assembler = IsoTpAssembler()
         val queue = ArrayDeque(initial)
         var flowControlSent = false
+
+        try {
+            return reassembleLoop(assembler, queue, timeoutMillis) { flowControlSent = true }
+        } finally {
+            // Responses stay suppressed from the moment flow control goes out
+            // until the message is complete. Restoring them any earlier sends
+            // an AT command into the middle of the consecutive-frame burst,
+            // and ELM-family firmware interrupts reception to service it - the
+            // frames are gone before anything reads them.
+            if (flowControlSent) adapter.setResponsesEnabled(true)
+            // Whatever is left belongs to the next message.
+            carried.addAll(queue)
+        }
+    }
+
+    private suspend fun reassembleLoop(
+        assembler: IsoTpAssembler,
+        queue: ArrayDeque<CanFrame>,
+        timeoutMillis: Long,
+        onFlowControlSent: () -> Unit,
+    ): ByteArray {
+        var flowControlSent = false
         var declaredLength = 0
+        val initial = queue.toList()
 
         while (true) {
             // Drain everything we currently hold.
@@ -243,8 +306,17 @@ class IsoTpChannel(
             // Mid-message with nothing left to process: the module is waiting
             // on us. Grant it the rest of the transfer, once.
             if (!flowControlSent) {
-                sendFlowControl()
+                // Anything that arrives in the same read as the flow control
+                // goes straight back into the queue rather than being thrown
+                // away - with no separation time the module's first
+                // consecutive frames get there that fast.
+                val alongside = sendFlowControl()
                 flowControlSent = true
+                onFlowControlSent()
+                if (alongside.isNotEmpty()) {
+                    queue.addAll(alongside)
+                    continue
+                }
             }
 
             // Scale the read window with the declared size: a long As-Built
@@ -264,18 +336,18 @@ class IsoTpChannel(
         }
     }
 
-    private suspend fun sendFlowControl() {
+    private suspend fun sendFlowControl(): List<CanFrame> {
         val fc = IsoTpFrame.FlowControl(
             IsoTpFrame.FlowStatus.CONTINUE_TO_SEND,
             config.blockSize,
             config.separationTimeRaw,
         )
+        // Responses off, and left off: see the finally in reassemble. Turning
+        // them back on here was the bug that made every reply longer than
+        // seven bytes fail on the vehicle while passing against the simulator,
+        // which has no such firmware behaviour to reproduce.
         adapter.setResponsesEnabled(false)
-        try {
-            adapter.sendFrameNoWait(fc.encode(padTo, config.padByte))
-        } finally {
-            adapter.setResponsesEnabled(true)
-        }
+        return adapter.sendFrameNoWait(fc.encode(padTo, config.padByte))
     }
 
     private fun throwForStatus(status: AdapterResponse.Status): Nothing = throw IsoTpException(

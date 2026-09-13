@@ -338,13 +338,22 @@ class ElmAdapter(
         Unit
     }
 
-    /** Sends a raw frame without waiting for any reply. Requires `ATR0`. */
-    suspend fun sendFrameNoWait(data: ByteArray) = mutex.withLock {
+    /**
+     * Sends a raw frame without waiting for a reply, returning any frames that
+     * happened to arrive in the same read. Requires `ATR0`.
+     *
+     * The read itself is not optional - the adapter emits a prompt even with
+     * ATR0, and leaving it buffered would corrupt the next reply. What is not
+     * optional either is keeping what comes with it: after a flow control
+     * frame the module starts sending immediately, and with a separation time
+     * of zero its first consecutive frames land inside this window. Discarding
+     * them, as this used to, loses the front of the message and the rest never
+     * adds up.
+     */
+    suspend fun sendFrameNoWait(data: ByteArray): List<CanFrame> = mutex.withLock {
         require(data.size <= 8) { "A CAN 2.0 frame carries at most 8 bytes, got ${data.size}" }
-        // Still read to the prompt: the adapter emits one even with ATR0, and
-        // leaving it in the buffer would be misread as part of the next reply.
-        rawCommand(data.toHex(), 400)
-        Unit
+        val response = rawCommand(data.toHex(), 400)
+        response.lines.mapNotNull { CanFrame.parse(it, extendedAddressing) }
     }
 
     /** Escape hatch for raw AT/ST commands, e.g. a terminal screen in the UI. */

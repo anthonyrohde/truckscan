@@ -49,6 +49,11 @@ value class DtcStatus(val raw: Int) {
             else if (testFailedSinceLastClear) add("historic")
             if (warningIndicatorRequested) add("MIL requested")
             if (testNotCompletedSinceLastClear) add("test incomplete")
+            // Bit 6 had no case at all, so a module reporting 0x40 and nothing
+            // else - a real and common answer - displayed as "no status flags
+            // set", which reads as "no information" rather than as the
+            // specific thing it means.
+            if (testNotCompletedThisOperationCycle) add("not tested this cycle")
         }
         return if (parts.isEmpty()) "no status flags set" else parts.joinToString(", ")
     }
