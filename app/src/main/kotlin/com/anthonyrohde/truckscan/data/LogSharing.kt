@@ -71,6 +71,23 @@ object LogSharing {
         }
     }
 
+    /**
+     * The log as plain text, for writing straight to a location the user picks.
+     *
+     * Sharing and saving are not the same need. The share sheet sends the file
+     * to another app and what happens to it there is that app's business;
+     * saving puts a file somewhere findable, which is what you want before a
+     * drive rather than after.
+     */
+    fun exportText(context: Context, log: SessionLog): String =
+        header(context) + "\n" + log.export() + "\n"
+
+    /** A filename with the timestamp in it, for the save dialog to suggest. */
+    fun suggestedFileName(): String {
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        return "truckscan-log-$stamp.txt"
+    }
+
     /** Writes the log out and opens the share sheet. */
     fun share(context: Context, log: SessionLog) {
         val file = writeToCache(context, log)

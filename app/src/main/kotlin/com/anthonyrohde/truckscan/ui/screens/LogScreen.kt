@@ -15,6 +15,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
@@ -35,6 +37,23 @@ import com.anthonyrohde.truckscan.data.LogSharing
 fun LogScreen(viewModel: ScanViewModel) {
     val entries by viewModel.log.entries.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    // The system file picker rather than a fixed directory: it needs no
+    // storage permission at any API level, and it puts the file where the
+    // user will actually look for it instead of where the app guessed.
+    val saveLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain"),
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { stream ->
+                    stream.write(
+                        LogSharing.exportText(context, viewModel.log).toByteArray(),
+                    )
+                }
+            }
+        }
+    }
     val listState = rememberLazyListState()
 
     // Follow the tail as new traffic arrives.
@@ -53,15 +72,19 @@ fun LogScreen(viewModel: ScanViewModel) {
                 enabled = entries.isNotEmpty(),
             ) { Text("Share") }
             OutlinedButton(
+                onClick = { saveLauncher.launch(LogSharing.suggestedFileName()) },
+                enabled = entries.isNotEmpty(),
+            ) { Text("Save") }
+            OutlinedButton(
                 onClick = { viewModel.log.clear() },
                 enabled = entries.isNotEmpty(),
             ) { Text("Clear") }
         }
         Explanation(
-            "${entries.size} entries. Newest at the bottom. Share sends the " +
-                "whole log as a text file - a screenshot only shows a few lines " +
-                "of it, and the lines that explain a failure are rarely the ones " +
-                "on screen.",
+            "${entries.size} entries. Newest at the bottom. Share sends the whole " +
+                "log to another app; Save writes it to a folder you choose. Either " +
+                "beats a screenshot, which shows a few lines of it and rarely the " +
+                "ones that explain a failure.",
         )
 
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(8.dp)) {
