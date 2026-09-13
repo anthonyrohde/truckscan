@@ -229,29 +229,30 @@ object PidCatalog {
      * of the two sensors are present, then two 16-bit readings scaled by 1/32
      * of a kPa.
      *
-     * UNVERIFIED. The layout is from the standard, not from this truck. It is
-     * checkable in one reading: with the engine off, manifold pressure is
-     * ambient, so this should agree with barometric pressure (PID 0x33) to
-     * within a couple of kPa. If it reads 3200 or 3.1, the divisor is wrong.
+     * CONFIRMED on the vehicle. At idle it read 102 kPa with barometric
+     * pressure reading 101 kPa in the same sweep - manifold pressure is
+     * absolute, so at idle it is atmospheric, and agreeing with the barometer
+     * to 1 kPa is the check passing. A wrong divisor would have read 3200 or
+     * 3.1, not 102.
      */
     val INTAKE_MAP_EXTENDED = Pid(
         key = "map_ext", id = 0x87, name = "Intake manifold absolute pressure",
         shortName = "Manifold", unit = "kPa", byteCount = 3,
-        minValue = 0.0, maxValue = 500.0, decimals = 0, decodeVerified = false,
+        minValue = 0.0, maxValue = 500.0, decimals = 0,
         decoder = { ((it.u8(1) shl 8) or it.u8(2)) / 32.0 },
     )
 
     /**
      * Distance travelled, straight from the module.
      *
-     * UNVERIFIED, but verifiable exactly: the cluster in this truck read
-     * 35707.4 km, so a correct decode returns that and a wrong divisor returns
-     * 357074 or 3570.74. Four bytes, tenths of a kilometre.
+     * CONFIRMED on the vehicle, against the only ground truth available: the
+     * truck's own cluster read 35707.4 km, and so did this. Four bytes, tenths
+     * of a kilometre. A wrong divisor would have read 357074 or 3570.74.
      */
     val ODOMETER = Pid(
         key = "odometer", id = 0xA6, name = "Odometer", shortName = "Odometer",
         unit = "km", byteCount = 4, minValue = 0.0, maxValue = 1_000_000.0,
-        decimals = 1, isCounter = true, decodeVerified = false,
+        decimals = 1, isCounter = true,
         decoder = {
             (((it.u8(0).toLong() shl 24) or (it.u8(1).toLong() shl 16) or
                 (it.u8(2).toLong() shl 8) or it.u8(3).toLong()) / 10.0)

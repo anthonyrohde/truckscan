@@ -142,6 +142,25 @@ Two things were tested that this project had asserted without evidence:
 - `ATCRA` made no observable difference here: with the filter cleared, only 7E8
   replied anyway, consistent with the gateway not mirroring traffic.
 
+### Decoders confirmed against the vehicle
+
+Two decoders the cluster depends on were guesses from the standard. Both are
+now measured, at idle with the engine running:
+
+| PID | Read | Check | Verdict |
+|-----|------|-------|---------|
+| 0xA6 odometer | 35707.4 km | the truck's own cluster reads 35707.4 km | correct |
+| 0x87 manifold | 102 kPa | barometric (0x33) read 101 kPa in the same sweep, and manifold pressure is absolute, so at idle it is atmospheric | correct |
+
+A wrong divisor on either would have produced a plausible number rather than an
+error - 357074 km, or 3200 kPa - which is why both were marked unconfirmed on
+the gauge face until there was something to check them against.
+
+Still not decoding on this truck, despite the vehicle reporting them supported:
+**0x78 exhaust gas temperature** and **0x6B EGR temperature**. Both are
+multi-sensor structures with a leading status byte, so the likely fault is this
+app's expected layout rather than the vehicle.
+
 ### What the PCM offers
 
 67 PIDs claimed across six bitmaps, 62 of them carrying a reading. Recorded

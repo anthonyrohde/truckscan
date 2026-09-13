@@ -142,11 +142,32 @@ class ClusterTest {
         assertEquals("n/a", unsupported.text)
     }
 
+    /**
+     * Both of the cluster's once-unconfirmed decoders have now been measured on
+     * the truck: manifold pressure read 102 kPa against a barometer reading 101
+     * in the same sweep, and the odometer read 35707.4 km, which is what the
+     * truck's own cluster says. Nothing on the face is unverified any more, and
+     * this test is what will notice if something unverified is added.
+     */
+    @Test
+    fun `every dial on the face has a decoder measured against a vehicle`() {
+        for (reading in Cluster.readAll(emptyMap())) {
+            assertTrue(
+                reading.verified,
+                "${reading.dial.id} uses a decoder that has never been checked on a vehicle",
+            )
+        }
+    }
+
+    /** The unverified path still has to work, for the next one that is added. */
     @Test
     fun `an unverified decode is carried through to the gauge`() {
-        val boost = Cluster.LAYOUT.arcs.single { it.id == "boost" }
-        // map_ext's scaling has never been checked against a vehicle.
-        assertFalse(Cluster.read(boost, emptyMap()).verified)
+        val unproven = speedo.copy(
+            id = "x",
+            source = Cluster.Source.Single("guess"),
+        )
+        // No catalogue entry at all is the strongest form of unverified.
+        assertFalse(Cluster.read(unproven, emptyMap()).verified)
         assertTrue(Cluster.read(speedo, emptyMap()).verified)
     }
 
