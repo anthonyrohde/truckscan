@@ -16,12 +16,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.anthonyrohde.truckscan.ScanViewModel
+import com.anthonyrohde.truckscan.data.LogSharing
 
 /**
  * Raw adapter traffic.
@@ -32,6 +34,7 @@ import com.anthonyrohde.truckscan.ScanViewModel
 @Composable
 fun LogScreen(viewModel: ScanViewModel) {
     val entries by viewModel.log.entries.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val listState = rememberLazyListState()
 
     // Follow the tail as new traffic arrives.
@@ -45,9 +48,21 @@ fun LogScreen(viewModel: ScanViewModel) {
             Modifier.padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OutlinedButton(onClick = { viewModel.log.clear() }) { Text("Clear") }
+            OutlinedButton(
+                onClick = { LogSharing.share(context, viewModel.log) },
+                enabled = entries.isNotEmpty(),
+            ) { Text("Share") }
+            OutlinedButton(
+                onClick = { viewModel.log.clear() },
+                enabled = entries.isNotEmpty(),
+            ) { Text("Clear") }
         }
-        Explanation("${entries.size} entries. Newest at the bottom.")
+        Explanation(
+            "${entries.size} entries. Newest at the bottom. Share sends the " +
+                "whole log as a text file - a screenshot only shows a few lines " +
+                "of it, and the lines that explain a failure are rarely the ones " +
+                "on screen.",
+        )
 
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(8.dp)) {
             items(entries) { entry ->

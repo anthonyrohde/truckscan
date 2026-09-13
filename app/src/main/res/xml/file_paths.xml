@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Exported logs live in a single cache subdirectory and nothing else is
+    shared. Scoping the provider this narrowly matters: a broader path would
+    hand every app the user shares to a readable handle on saved As-Built
+    backups, which carry the VIN and module part numbers.
+-->
+<paths>
+    <cache-path name="shared-logs" path="logs/" />
+</paths>

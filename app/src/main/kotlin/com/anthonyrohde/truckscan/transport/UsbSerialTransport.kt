@@ -195,10 +195,12 @@ class UsbSerialTransport(
 
     companion object {
         /**
-         * Line rates to try, fastest first.
+         * Line rates to try, in the order worth trying them.
          *
-         * 2 Mbit/s is what the OBDLink EX advertises; the intermediate steps
-         * cover bridges that cap lower, and 115,200 is the universal floor.
+         * 115,200 leads because it is where ELM327 and STN adapters power up,
+         * so it is the rate an adapter is speaking unless something has moved
+         * it. The faster entries cover an adapter left at a higher rate by a
+         * previous session; the slower ones cover older bridges.
          */
         private val BAUD_CANDIDATES =
             listOf(115_200, 2_000_000, 1_000_000, 500_000, 38_400, 9_600)
@@ -212,5 +214,25 @@ class UsbSerialTransport(
         private const val PROBE_WRITE_TIMEOUT_MS = 500
         private const val PROBE_READ_TIMEOUT_MS = 120
         private const val PROBE_WINDOW_MS = 400L
+
+        private const val ACTION_USB_PERMISSION = "com.anthonyrohde.truckscan.USB_PERMISSION"
+
+        /** Adapters currently attached. */
+        fun findDrivers(context: Context): List<UsbSerialDriver> {
+            val manager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+            return UsbSerialProber.getDefaultProber().findAllDrivers(manager)
+        }
+
+        /** Asks Android for permission to talk to [driver]. */
+        fun requestPermission(context: Context, driver: UsbSerialDriver) {
+            val manager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+            val intent = PendingIntent.getBroadcast(
+                context,
+                0,
+                Intent(ACTION_USB_PERMISSION).setPackage(context.packageName),
+                PendingIntent.FLAG_IMMUTABLE,
+            )
+            manager.requestPermission(driver.device, intent)
+        }
     }
 }
