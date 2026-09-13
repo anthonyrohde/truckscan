@@ -1,6 +1,8 @@
 package com.anthonyrohde.truckscan.ui.screens
 
 import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.view.WindowManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -68,6 +70,22 @@ fun LiveDataScreen(viewModel: ScanViewModel) {
     val alerts by viewModel.alerts.collectAsStateWithLifecycle()
 
     var showPicker by remember { mutableStateOf(false) }
+    val recording by viewModel.isRecording.collectAsStateWithLifecycle()
+    val recordedRows by viewModel.recordedRows.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    // The system picker rather than a fixed folder: no storage permission at
+    // any API level, and the file lands where the user will look for it.
+    val saveLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv"),
+    ) { uri ->
+        val csv = viewModel.recordingCsv()
+        if (uri != null && csv != null) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { it.write(csv.toByteArray()) }
+            }
+        }
+    }
     val streaming = sample != null
 
     KeepScreenOn(enabled = streaming)
@@ -112,6 +130,21 @@ fun LiveDataScreen(viewModel: ScanViewModel) {
                     Text("Choose (${watched.size})")
                 }
             }
+        }
+
+        // Recording gets its own row rather than sharing with Start and Stop:
+        // it is the control you reach for with the engine running, and the one
+        // whose state you need to be able to read at a glance.
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            RecordingControls(
+                recording = recording,
+                rows = recordedRows,
+                onStart = { viewModel.startRecording() },
+                onStop = { viewModel.stopRecording() },
+                onSave = { saveLauncher.launch(csvFileName()) },
+                canSave = recordedRows > 0,
+                summary = viewModel.recordingSummary(),
+            )
         }
 
         // Warnings first. On a dash-mounted screen the top of the display is
@@ -337,4 +370,53 @@ private fun ParameterPicker(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
+}
+
+/** Suggested name for a saved recording, timestamped so runs do not collide. */
+private fun csvFileName(): String {
+    val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+        .format(java.util.Date())
+    return "truckscan-live-$stamp.csv"
+}
+
+/**
+ * Record, stop and save, with the sample count visible while it runs.
+ *
+ * The count is there so the screen answers "is this actually capturing?"
+ * without being tapped - which matters when the phone is on the dash and the
+ * truck is moving.
+ */
+@Composable
+private fun RecordingControls(
+    recording: Boolean,
+    rows: Int,
+    canSave: Boolean,
+    summary: String,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onSave: () -> Unit,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (recording) {
+                Button(onClick = onStop) { Text("Stop recording") }
+            } else {
+                Button(onClick = onStart) { Text("Record") }
+            }
+
+            OutlinedButton(onClick = onSave, enabled = canSave) { Text("Save CSV") }
+
+            Spacer(Modifier.weight(1f))
+
+            Text(
+                text = if (recording) "recording - $rows" else summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }

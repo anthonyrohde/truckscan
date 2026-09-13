@@ -8,6 +8,7 @@ import com.anthonyrohde.truckscan.core.ford.AsBuiltSnapshot
 import com.anthonyrohde.truckscan.core.pid.Pid
 import com.anthonyrohde.truckscan.core.pid.PidCatalog
 import com.anthonyrohde.truckscan.core.pid.PidValue
+import com.anthonyrohde.truckscan.core.session.LiveRecording
 import com.anthonyrohde.truckscan.core.pid.ZoneSeverity
 import com.anthonyrohde.truckscan.core.session.ConnectionState
 import com.anthonyrohde.truckscan.core.session.DiagnosticEngine
@@ -85,6 +86,20 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
      * by severity: on a dash-mounted phone the first line is the only one
      * guaranteed to be read.
      */
+    /**
+     * The recording in progress, or the last one taken.
+     *
+     * Kept separate from the live sample so that stopping the stream does not
+     * lose what was recorded - the whole point is to look at it afterwards.
+     */
+    private var recording: LiveRecording? = null
+
+    private val _recordedRows = MutableStateFlow(0)
+    val recordedRows: StateFlow<Int> = _recordedRows.asStateFlow()
+
+    private val _isRecording = MutableStateFlow(false)
+    val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
+
     private val _alerts = MutableStateFlow<List<PidValue>>(emptyList())
     val alerts: StateFlow<List<PidValue>> = _alerts.asStateFlow()
 
@@ -260,6 +275,20 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                         _alerts.value = sample.values.values
                             .filter { it.severity != ZoneSeverity.NORMAL }
                             .sortedByDescending { it.severity.ordinal }
+
+                        if (_isRecording.value) {
+                            val active = recording
+                            if (active != null && !active.add(sample)) {
+                                // Full. Stop rather than silently dropping the
+                                // rest, so what is saved matches what the
+                                // counter said.
+                                _isRecording.value = false
+                                _message.value =
+                                    "Recording stopped: reached ${active.rowCount} rows. " +
+                                        "Save it before starting another."
+                            }
+                            _recordedRows.value = active?.rowCount ?: 0
+                        }
                     }
             } catch (e: Exception) {
                 _message.value = e.message
@@ -267,9 +296,41 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Begins recording the live stream, starting it if it is not already running.
+     *
+     * Recording without polling would be an empty file, and having to start two
+     * things in the right order before driving off is a trap.
+     */
+    fun startRecording() {
+        if (!isStreaming) startLiveData()
+        if (!isStreaming) return
+        recording = LiveRecording()
+        _recordedRows.value = 0
+        _isRecording.value = true
+    }
+
+    /** Stops recording but leaves the stream running and the data intact. */
+    fun stopRecording() {
+        _isRecording.value = false
+    }
+
+    /** The recording as CSV, or null when nothing has been recorded. */
+    fun recordingCsv(): String? = recording?.takeIf { it.rowCount > 0 }?.toCsv()
+
+    fun recordingSummary(): String {
+        val active = recording ?: return "Nothing recorded yet."
+        if (active.rowCount == 0) return "Nothing recorded yet."
+        val seconds = active.durationSeconds
+        return "${active.rowCount} samples over ${"%.0f".format(seconds)} s"
+    }
+
     fun stopLiveData() {
         liveDataJob?.cancel()
         liveDataJob = null
+        // Polling has stopped, so nothing more can be recorded. The data
+        // already captured stays put until a new recording replaces it.
+        _isRecording.value = false
         // Stale alerts are worse than none: a warning left on screen after
         // polling stopped implies the condition is still being watched.
         _alerts.value = emptyList()
