@@ -525,6 +525,15 @@ object ProbeLibrary {
                 02016F0000000000    # turbocharger compressor inlet pressure
                 0201700000000000    # boost pressure control
 
+                # ============================ supported, and this app fails to decode them
+                # The vehicle reports both as supported and neither produces a reading, so
+                # the suspect is the layout this app expects rather than the truck. Both are
+                # multi-sensor structures with a leading byte saying which sensors are
+                # present. The raw bytes are the whole point of asking - with them the fix is
+                # arithmetic, without them it is another guess.
+                0201780000000000    # exhaust gas temperature, bank 1
+                02016B0000000000    # EGR temperature
+
                 ATZ
             """.trimIndent(),
         ),
