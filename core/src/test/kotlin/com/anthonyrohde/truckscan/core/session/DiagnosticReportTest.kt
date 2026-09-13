@@ -192,16 +192,16 @@ class DiagnosticReportTest {
                 quietBuses = listOf("HS-CAN1", "MS-CAN"),
             ),
         )
-        assertTrue(asleep.contains("No traffic was seen on: HS-CAN1, MS-CAN"), asleep)
-        assertTrue(asleep.contains("ignition"), asleep)
+        assertTrue(asleep.contains("HS-CAN1, MS-CAN"), asleep)
+        // Recorded, but explicitly not treated as a diagnosis.
+        assertTrue(asleep.contains("means very little"), asleep)
 
         val awake = report(
             moduleScan = DiagnosticReport.ModuleScan(
                 ranAtMillis = 1_757_000_000_000, full = true, found = 0,
             ),
         )
-        assertTrue(awake.contains("carrying traffic"), awake)
-        assertFalse(awake.contains("ignition"), awake)
+        assertTrue(awake.contains("none replied"), awake)
     }
 
     @Test

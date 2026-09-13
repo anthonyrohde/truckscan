@@ -212,12 +212,14 @@ function Format-Reply {
 
 $Investigations = @{
     alive = @{
-        Title = 'Which addresses are alive'
+        Title = 'Can anything be overheard (answered - no)'
         Body  = @'
-# Modules that are awake transmit on their own. If this lists CAN IDs,
-# discovery could be seconds rather than the 1024-address sweep that
-# currently takes minutes - and would find modules the address list
-# does not know about. Ignition ON.
+# Answered on a 2022 F-250: nothing can be overheard. With the ignition
+# on and the PCM answering 150 ms earlier, ATMA, STM and STMA all
+# reported silence, with and without a receive filter - the gateway in
+# front of the OBD port routes diagnostic traffic on request and does
+# not mirror the internal buses. Kept because another vehicle may
+# answer differently. Ignition ON.
 ATZ
 ATE0
 ATH1
@@ -229,38 +231,78 @@ ATMA
         Title = 'Which MS-CAN init works'
         Body  = @'
 # MS-CAN is 125 kbps on pins 3/11 and needs ELM327 protocol B, whose
-# options byte is documented inconsistently. The app tries five
-# candidates every time and caches none, because none was ever
-# confirmed. Ignition ON - a sleeping bus is silent whichever is right.
+# options byte is documented inconsistently. The app tries five candidates
+# every time and caches none, because none was ever confirmed.
+#
+# This does NOT use ATMA to judge them. Monitoring returns silence on this
+# vehicle even while a module is answering, so it cannot tell a working
+# setup from a broken one. Instead each candidate is followed by a
+# TesterPresent to addresses that live on MS-CAN, and the reply is the
+# verdict:
+#
+#   a reply (7xx ... 7E ...) -> this candidate works
+#   NO DATA                  -> configured correctly, nobody home
+#   CAN ERROR                -> the physical layer did not come up; wrong
+#
+# The difference between NO DATA and CAN ERROR is the whole point.
+# Ignition ON.
+
 ATZ
 ATE0
 ATH1
 ATCAF0
+ATCRA
 
+# --- the adapter's own command, if it has one
 STP 33
 STPBR 125000
 STPBRR
-ATMA
+ATSH 726
+023E000000000000
+ATSH 720
+023E000000000000
+ATSH 7D0
+023E000000000000
 
+# --- ELM protocol B, options C0
 ATPB C0 04
 ATSPB
-ATMA
+ATSH 726
+023E000000000000
+ATSH 720
+023E000000000000
 
+# --- options 40
 ATPB 40 04
 ATSPB
-ATMA
+ATSH 726
+023E000000000000
+ATSH 720
+023E000000000000
 
+# --- options 01
 ATPB 01 04
 ATSPB
-ATMA
+ATSH 726
+023E000000000000
+ATSH 720
+023E000000000000
 
+# --- options 11
 ATPB 11 04
 ATSPB
-ATMA
+ATSH 726
+023E000000000000
+ATSH 720
+023E000000000000
 
+# --- options 80
 ATPB 80 04
 ATSPB
-ATMA
+ATSH 726
+023E000000000000
+ATSH 720
+023E000000000000
 '@
     }
     burst = @{

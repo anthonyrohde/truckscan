@@ -27,51 +27,87 @@ object ProbeLibrary {
             name = "Which MS-CAN init works",
             question =
             "MS-CAN runs at 125 kbps on pins 3/11 and needs the ELM327 user-defined " +
-                "protocol B. Its options byte is documented inconsistently across " +
-                "datasheet revisions, so the app tries five candidates every time it " +
-                "touches that bus and caches nothing, because none has ever been " +
-                "confirmed. This tries each and watches for traffic. Run it with the " +
-                "ignition ON - a sleeping bus is silent whichever byte is right, which " +
-                "would make every candidate look equally wrong.",
+                "protocol B, whose options byte is documented inconsistently. The app " +
+                "tries five candidates every time and caches none, because none was " +
+                "ever confirmed. Each candidate is judged by whether a module replies, " +
+                "not by listening to the bus - monitoring reports silence on this " +
+                "vehicle even while a module is answering, so it cannot tell a working " +
+                "setup from a broken one. CAN ERROR means the physical layer did not " +
+                "come up; NO DATA means it did and nobody was home. Ignition ON.",
             script = """
-                # Each block: configure, then listen for traffic.
-                # ATMA returns lines if the bus is alive, STOPPED if silent.
+                # MS-CAN is 125 kbps on pins 3/11 and needs ELM327 protocol B, whose
+                # options byte is documented inconsistently. The app tries five candidates
+                # every time and caches none, because none was ever confirmed.
+                #
+                # This does NOT use ATMA to judge them. Monitoring returns silence on this
+                # vehicle even while a module is answering, so it cannot tell a working
+                # setup from a broken one. Instead each candidate is followed by a
+                # TesterPresent to addresses that live on MS-CAN, and the reply is the
+                # verdict:
+                #
+                #   a reply (7xx ... 7E ...) -> this candidate works
+                #   NO DATA                  -> configured correctly, nobody home
+                #   CAN ERROR                -> the physical layer did not come up; wrong
+                #
+                # The difference between NO DATA and CAN ERROR is the whole point.
+                # Ignition ON.
 
                 ATZ
                 ATE0
                 ATH1
                 ATCAF0
+                ATCRA
 
-                # The adapter's own native command, if it has one.
+                # --- the adapter's own command, if it has one
                 STP 33
                 STPBR 125000
                 STPBRR
-                ATMA
+                ATSH 726
+                023E000000000000
+                ATSH 720
+                023E000000000000
+                ATSH 7D0
+                023E000000000000
 
-                # ELM protocol B, options C0
+                # --- ELM protocol B, options C0
                 ATPB C0 04
                 ATSPB
-                ATMA
+                ATSH 726
+                023E000000000000
+                ATSH 720
+                023E000000000000
 
-                # options 40
+                # --- options 40
                 ATPB 40 04
                 ATSPB
-                ATMA
+                ATSH 726
+                023E000000000000
+                ATSH 720
+                023E000000000000
 
-                # options 01
+                # --- options 01
                 ATPB 01 04
                 ATSPB
-                ATMA
+                ATSH 726
+                023E000000000000
+                ATSH 720
+                023E000000000000
 
-                # options 11
+                # --- options 11
                 ATPB 11 04
                 ATSPB
-                ATMA
+                ATSH 726
+                023E000000000000
+                ATSH 720
+                023E000000000000
 
-                # options 80
+                # --- options 80
                 ATPB 80 04
                 ATSPB
-                ATMA
+                ATSH 726
+                023E000000000000
+                ATSH 720
+                023E000000000000
             """.trimIndent(),
         ),
 
@@ -134,14 +170,17 @@ object ProbeLibrary {
         ),
 
         Investigation(
-            name = "Which addresses are alive",
+            name = "Can anything be overheard (answered: no)",
             question =
-            "A full sweep probes 256 addresses on each bus and takes minutes, because " +
-                "it asks every possible address whether anything is there. Modules " +
-                "that are awake transmit on their own, so listening for a few seconds " +
-                "should name them in one go. If this returns a useful set of IDs, " +
-                "discovery could be seconds rather than minutes and would find modules " +
-                "the address list does not know about. Run with the ignition ON.",
+            "Asked whether listening to the bus could replace the 1024-address sweep. " +
+                "Answered on a 2022 F-250: no. With the ignition on and the PCM " +
+                "answering a request 150 ms earlier, ATMA, STM and STMA all reported " +
+                "silence, with and without a receive filter. The likeliest reason is " +
+                "the gateway these trucks put in front of the OBD port: it routes " +
+                "diagnostic traffic on request and does not mirror the internal buses, " +
+                "so there is nothing to overhear. Kept because the answer may differ on " +
+                "another vehicle, and because a negative result is worth being able to " +
+                "reproduce.",
             script = """
                 ATZ
                 ATE0

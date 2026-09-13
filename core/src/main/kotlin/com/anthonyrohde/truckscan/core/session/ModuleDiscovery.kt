@@ -77,7 +77,7 @@ class ModuleDiscovery(
         val selection = adapter.selectBus(bus)
         logger?.invoke(
             "Scanning ${bus.displayName} via ${selection.sequenceLabel}" +
-                if (selection.trafficObserved) "" else " (bus quiet - is the ignition on?)",
+                if (selection.trafficObserved) " - traffic seen" else "",
         )
 
         val found = mutableListOf<DiscoveredModule>()

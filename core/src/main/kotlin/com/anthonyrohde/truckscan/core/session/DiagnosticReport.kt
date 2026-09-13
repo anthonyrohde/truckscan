@@ -101,21 +101,20 @@ data class DiagnosticReport(
                             "no module answered.",
                     )
                     appendLine()
-                    if (scan.quietBuses.isEmpty()) {
-                        // The stranger case, and worth separating: the bus was
-                        // alive and still nothing replied to a direct request.
-                        appendLine("  The buses were carrying traffic, so the vehicle was awake")
-                        appendLine("  and simply did not answer. That is unusual and worth the")
-                        appendLine("  adapter log below.")
-                    } else {
-                        appendLine(
-                            "  No traffic was seen on: ${scan.quietBuses.joinToString(", ")}.",
-                        )
+                    appendLine("  Every address was probed and none replied.")
+                    appendLine()
+                    appendLine("  Worth checking in order: the adapter fully seated in the")
+                    appendLine("  port, the ignition on, and then the Probe screen, which")
+                    appendLine("  shows whether the vehicle answers a direct request at all.")
+                    if (scan.quietBuses.isNotEmpty()) {
                         appendLine()
-                        appendLine("  A sleeping bus cannot answer, so the sweep could not have")
-                        appendLine("  succeeded - and it still probed every address to find that")
-                        appendLine("  out. The usual reason is the ignition being off. Turn the")
-                        appendLine("  key to ON - the engine need not be running - and scan again.")
+                        appendLine(
+                            "  No free-running traffic was seen on: " +
+                                scan.quietBuses.joinToString(", ") + ".",
+                        )
+                        appendLine("  That is recorded for completeness and means very little:")
+                        appendLine("  behind a gateway nothing is ever overheard, and this")
+                        appendLine("  vehicle reports silence even while a module is answering.")
                     }
                 }
             }

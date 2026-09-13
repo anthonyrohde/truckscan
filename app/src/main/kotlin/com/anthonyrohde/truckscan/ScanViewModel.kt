@@ -204,8 +204,14 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 .onSuccess {
                     val state = created.connectionState.value
                     if (state is ConnectionState.Connected && !state.busTrafficSeen) {
-                        _message.value = "Connected to ${it.model}, but the bus is quiet. " +
-                            "Turn the ignition on so the modules are awake."
+                        // Deliberately says nothing about the ignition. Seeing no
+                        // traffic does not mean the vehicle is asleep - on this
+                        // truck nothing is ever overheard even with a module
+                        // answering - so advice based on it would be a guess
+                        // dressed as a diagnosis.
+                        _message.value = "Connected to ${it.model}. No free-running " +
+                            "traffic was seen, which is normal behind a gateway - " +
+                            "scan modules to find out what is there."
                     }
                 }
         } catch (e: Exception) {
@@ -235,15 +241,17 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     fun scanModules(full: Boolean = false) = viewModelScope.launch {
         val active = engine ?: return@launch
 
-        // Say this before the sweep rather than after. A full sweep probes 256
-        // addresses on each bus, which is minutes of work, and on a sleeping
-        // bus it cannot succeed - so the one moment this is worth knowing is
-        // before it starts, while the key is still within reach.
-        val connected = _connection.value as? ConnectionState.Connected
-        if (full && connected?.busTrafficSeen == false) {
-            _message.value = "The bus is silent, so a full sweep will probe every " +
-                "address and find nothing. Turn the ignition on first - the engine " +
-                "need not be running."
+        // A full sweep probes 256 addresses on each bus and takes minutes, so
+        // it is worth saying so before it starts rather than after.
+        //
+        // What is NOT said any more is anything about the bus being silent.
+        // That warning was here, and it was wrong: seeing no free-running
+        // traffic says nothing about whether the vehicle is awake, so it told
+        // people to check an ignition that was already on and talked them out
+        // of a sweep that would have worked.
+        if (full) {
+            _message.value = "Sweeping every address on each bus. This takes a " +
+                "couple of minutes."
         }
 
         val quietBuses = linkedSetOf<String>()
@@ -280,14 +288,10 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 .getOrDefault(PidCatalog.ALL)
 
             if (found.isEmpty()) {
-                _message.value = if (quietBuses.isEmpty()) {
-                    "No modules answered, although the bus was carrying traffic. That " +
-                        "is unusual - the adapter log will show what was sent."
-                } else {
-                    "No modules answered. Every bus scanned was silent " +
-                        "(${quietBuses.joinToString(", ")}), which usually means the " +
-                        "ignition is off."
-                }
+                _message.value = "No modules answered. Check the adapter is fully " +
+                    "seated in the OBD port and the ignition is on, then try the " +
+                    "Probe screen - it will show whether the vehicle answers a " +
+                    "direct request at all."
             }
         } catch (e: Exception) {
             _message.value = e.message

@@ -41,6 +41,21 @@ data class BusSelection(
     val sequenceLabel: String,
     /** True when we saw real frames after configuring. False means configured
      *  but silent - which is expected if the ignition is off. */
+    /**
+     * True when free-running traffic was actually seen on the bus.
+     *
+     * False means "none was seen", which is NOT the same as "the bus is
+     * asleep". Measured on a 2022 F-250: with the ignition on and a module
+     * answering a request 150 ms earlier, ATMA, STM and STMA all reported
+     * silence, with and without a receive filter. On a vehicle whose OBD port
+     * sits behind a gateway there is simply nothing to overhear - diagnostic
+     * traffic is routed on request and the internal buses are not mirrored.
+     *
+     * So a false here carries no information about the vehicle and must never
+     * be turned into advice about the ignition. It told the user to check a key
+     * that was already on, and sent the author of this code looking in the
+     * wrong place for an afternoon.
+     */
     val trafficObserved: Boolean,
 )
 
