@@ -9,6 +9,9 @@ import com.anthonyrohde.truckscan.core.pid.Pid
 import com.anthonyrohde.truckscan.core.pid.PidCatalog
 import com.anthonyrohde.truckscan.core.pid.PidValue
 import com.anthonyrohde.truckscan.core.session.LiveRecording
+import com.anthonyrohde.truckscan.core.session.DiagnosticReport
+import com.anthonyrohde.truckscan.core.util.Hex
+import com.anthonyrohde.truckscan.core.session.LiveHealth
 import com.anthonyrohde.truckscan.core.session.LiveValueHold
 import com.anthonyrohde.truckscan.core.pid.ZoneSeverity
 import com.anthonyrohde.truckscan.core.session.ConnectionState
@@ -101,6 +104,17 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
      * previous session say nothing about this one.
      */
     private var hold = LiveValueHold()
+
+    /**
+     * How reliably each parameter answers, for the diagnostic report.
+     *
+     * Kept for the whole session rather than per stream: "this never answers"
+     * is only worth saying after enough attempts to mean it.
+     */
+    private val health = LiveHealth()
+
+    /** Supported mode 01 count as the vehicle reported it, for the report. */
+    private var supportedPidCount: Int? = null
 
     private val _recordedRows = MutableStateFlow(0)
     val recordedRows: StateFlow<Int> = _recordedRows.asStateFlow()
@@ -213,6 +227,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             _modules.value = found
+            supportedPidCount = runCatching { active.liveData.readSupportedPids().size }.getOrNull()
             _availablePids.value = runCatching { active.liveData.availableParameters() }
                 .getOrDefault(PidCatalog.ALL)
 
@@ -302,6 +317,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                             _recordedRows.value = active?.rowCount ?: 0
                         }
 
+                        health.accept(sample)
                         val shown = sample.copy(values = hold.accept(sample))
                         _liveSample.value = shown
                         _staleKeys.value = hold.staleKeys(sample.timestampMillis)
@@ -356,6 +372,78 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     val isStreaming: Boolean get() = liveDataJob?.isActive == true
+
+    // ------------------------------------------------------- diagnostic report
+
+    /**
+     * Assembles everything known about this session into one report.
+     *
+     * Built here rather than in the UI because it draws on state the screens do
+     * not share, and rendered in :core so its content is tested - a diagnostic
+     * that is wrong about what is working sends whoever reads it somewhere
+     * else entirely.
+     */
+    fun buildDiagnosticReport(
+        appVersion: String,
+        device: String,
+        androidVersion: String,
+    ): String {
+        val state = _connection.value
+        val connected = state as? ConnectionState.Connected
+        val scan = _faults.value
+
+        // A module is taken as answering unless the fault scan says otherwise,
+        // since discovery only lists what replied in the first place.
+        val errorsByCode = scan?.results
+            ?.filter { it.error != null }
+            ?.associate { it.module.module.code to it.error.orEmpty() }
+            ?: emptyMap()
+
+        val modules = _modules.value.map { discovered ->
+            val code = discovered.module.code
+            val failure = errorsByCode[code]
+            DiagnosticReport.ModuleLine(
+                name = code,
+                address = Hex.encode(discovered.module.requestId, 3),
+                bus = discovered.bus.displayName,
+                answered = failure == null,
+                detail = failure ?: discovered.identification?.partNumber.orEmpty(),
+            )
+        }
+
+        val faultLines = scan?.results.orEmpty().flatMap { result ->
+            result.dtcs.map { dtc ->
+                "${result.module.module.code}  ${dtc.displayCode}  ${dtc.description} " +
+                    "[${dtc.status.describe()}]"
+            }
+        }
+
+        return DiagnosticReport(
+            generatedAtMillis = System.currentTimeMillis(),
+            appVersion = appVersion,
+            device = device,
+            androidVersion = androidVersion,
+            adapter = connected?.identity?.model ?: "not connected",
+            transport = engine?.transportDescription ?: "none",
+            multiBus = connected?.identity?.supportsMultiBus,
+            activeBus = connected?.activeBus?.displayName,
+            connection = when (state) {
+                is ConnectionState.Connected -> "Connected"
+                is ConnectionState.Connecting -> "Connecting: ${state.step}"
+                is ConnectionState.Failed -> "Failed: ${state.reason}"
+                ConnectionState.Disconnected -> "Disconnected"
+            },
+            modules = modules,
+            faults = faultLines,
+            supportedPidCount = supportedPidCount,
+            parametersOffered = _availablePids.value.size,
+            parametersWatched = _selectedPids.value.size,
+            health = health.parameters(),
+            timing = health.timing(),
+            recentLog = log.entries.value.takeLast(DIAGNOSTIC_LOG_LINES)
+                .map { "${it.time}  ${it.message}" },
+        ).render()
+    }
 
     // ---------------------------------------------------------------- As-Built
 

@@ -39,6 +39,9 @@ class DiagnosticEngine(
     isoTpConfig: IsoTpConfig = IsoTpConfig(),
     private val logger: ((String) -> Unit)? = null,
 ) {
+
+    /** What the transport calls itself, including the negotiated line rate. */
+    val transportDescription: String get() = transport.description
     val adapter = ElmAdapter(transport, logger)
     val channel = IsoTpChannel(adapter, isoTpConfig, logger)
 

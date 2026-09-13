@@ -82,6 +82,38 @@ object LogSharing {
     fun exportText(context: Context, log: SessionLog): String =
         header(context) + "\n" + log.export() + "\n"
 
+    /**
+     * Writes a full diagnostic report straight to Downloads.
+     *
+     * One tap, one findable file. The alternative - share sheet, pick an app,
+     * find where it went - is three decisions at the exact moment somebody is
+     * already annoyed that something is not working.
+     */
+    fun writeDiagnostic(context: Context, report: String): DownloadWriter.Result {
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        return DownloadWriter.writeText(context, "truckscan-diagnostic-$stamp.txt", report)
+    }
+
+    /** Version, device and Android version, as the report wants them. */
+    fun deviceFacts(context: Context): Triple<String, String, String> {
+        val version = runCatching {
+            val info = context.packageManager.getPackageInfo(context.packageName, 0)
+            val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                info.versionCode.toLong()
+            }
+            "${info.versionName} (build $code)"
+        }.getOrDefault("unknown")
+
+        return Triple(
+            version,
+            "${Build.MANUFACTURER} ${Build.MODEL}",
+            "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
+        )
+    }
+
     /** A filename with the timestamp in it, for the save dialog to suggest. */
     fun suggestedFileName(): String {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
