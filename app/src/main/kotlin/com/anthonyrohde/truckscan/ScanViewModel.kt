@@ -205,6 +205,22 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
 
             result.onFailure { _message.value = it.message }
                 .onSuccess {
+                    // Ask the vehicle what it has, here, rather than only after
+                    // a module scan. Without this the live screen offered all
+                    // 47 catalogue parameters, twenty of which this engine does
+                    // not have, and spent most of every sweep collecting
+                    // refusals. Failure keeps the full catalogue: an unanswered
+                    // query means we do not know, not that nothing is there.
+                    runCatching { created.liveData.availableParameters() }
+                        .onSuccess { pids ->
+                            _availablePids.value = pids
+                            val offered = pids.map { p -> p.key }.toSet()
+                            val keep = _selectedPids.value intersect offered
+                            _selectedPids.value = keep.ifEmpty {
+                                PidCatalog.DEFAULT_SELECTION.toSet() intersect offered
+                            }
+                        }
+
                     val state = created.connectionState.value
                     // Battery first. It is the only thing here that can leave
                     // someone stranded, and it outranks anything about buses.

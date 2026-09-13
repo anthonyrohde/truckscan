@@ -24,6 +24,14 @@ data class LiveDataSample(
     val timestampMillis: Long = System.currentTimeMillis(),
     /** Parameters that did not decode this sweep, so the UI can grey them out. */
     val failedKeys: Set<String> = emptySet(),
+    /**
+     * Parameters the vehicle explicitly refused.
+     *
+     * Distinct from [failedKeys], which can mean a missed sweep. A refusal is
+     * permanent, so a gauge in here is never going to fill and should say so
+     * rather than sit blank looking broken.
+     */
+    val refusedKeys: Set<String> = emptySet(),
     /** Wall-clock duration of the sweep, so the UI can show the achieved rate. */
     val sweepMillis: Long = 0,
 )
@@ -64,13 +72,27 @@ class LiveDataPoller(
      * One request per 32-parameter bank instead of probing individually, which
      * is both faster and avoids filling the log with no-data results.
      */
+    /**
+     * Parameters this vehicle has answered with a flat refusal.
+     *
+     * Kept for the life of the poller. A module that says "request out of
+     * range" for a parameter is describing its own capabilities, and those do
+     * not change between sweeps.
+     */
+    private val refused = mutableSetOf<Int>()
+
+    /** What the vehicle has refused so far, for the UI to explain a blank gauge. */
+    val refusedPids: Set<Int> get() = refused.toSet()
+
     suspend fun readSupportedPids(): Set<Int> {
         runCatching { busRouter?.ensureBus(CanBus.HS_CAN1) }
         val supported = mutableSetOf<Int>()
         for (base in listOf(0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0)) {
-            val payload = requestPid(base) ?: break
-            val batch = PidCatalog.decodeSupportMask(base, payload)
-            supported += batch
+            // A refusal here ends the chain rather than aborting it: asking for
+            // bank 0xC0 on an engine that stops at 0xA0 is a normal way to find
+            // the end, and this truck answers 7F 01 31 to exactly that.
+            val payload = (requestPid(base) as? Answer.Value)?.payload ?: break
+            supported += PidCatalog.decodeSupportMask(base, payload)
             // Bit 0 of the last byte indicates the next bank exists.
             if (payload.size < 4 || payload.u8(3) and 0x01 == 0) break
         }
@@ -106,22 +128,40 @@ class LiveDataPoller(
         val startedAt = System.currentTimeMillis()
         val values = linkedMapOf<String, PidValue>()
         val failed = mutableSetOf<String>()
+        val refusedKeys = mutableSetOf<String>()
 
         for ((pidId, group) in pids.groupBy { it.id }) {
-            val payload = requestPid(pidId)
-            if (payload == null) {
-                group.forEach { failed += it.key }
+            // Asking again for something the vehicle has already refused costs
+            // a round trip per sweep, every sweep, forever. One refusal is
+            // enough; the answer is a property of the engine, not of the
+            // moment.
+            if (pidId in refused) {
+                group.forEach { refusedKeys += it.key; failed += it.key }
                 continue
             }
-            for (pid in group) {
-                val decoded = pid.decode(payload)
-                if (decoded != null) values[pid.key] = decoded else failed += pid.key
+
+            when (val answer = requestPid(pidId)) {
+                is Answer.Refused -> {
+                    refused += pidId
+                    logger?.invoke(
+                        "Vehicle refused PID %02X - not asking again this session".format(pidId),
+                    )
+                    group.forEach { refusedKeys += it.key; failed += it.key }
+                }
+
+                is Answer.NoAnswer -> group.forEach { failed += it.key }
+
+                is Answer.Value -> for (pid in group) {
+                    val decoded = pid.decode(answer.payload)
+                    if (decoded != null) values[pid.key] = decoded else failed += pid.key
+                }
             }
         }
 
         return LiveDataSample(
             values = values,
             failedKeys = failed,
+            refusedKeys = refusedKeys,
             sweepMillis = System.currentTimeMillis() - startedAt,
         )
     }
@@ -150,8 +190,8 @@ class LiveDataPoller(
      * Strips the echoed mode and PID bytes so the caller gets just the value
      * payload.
      */
-    private suspend fun requestPid(pid: Int): ByteArray? =
-        runCatching { readParameter(pid) }.getOrNull()
+    private suspend fun requestPid(pid: Int): Answer =
+        runCatching { readParameter(pid) }.getOrElse { Answer.NoAnswer }
 
     /**
      * Sends the request and waits for the reply that answers it.
@@ -168,7 +208,7 @@ class LiveDataPoller(
      * So: keep reading until the matching echo turns up or the deadline passes.
      * Nothing is re-sent, because the answer is already on its way.
      */
-    private suspend fun readParameter(pid: Int): ByteArray? {
+    private suspend fun readParameter(pid: Int): Answer {
         val deadline = System.currentTimeMillis() + PID_TIMEOUT_MS
         var response = channel.request(
             VehicleProfiles.OBD_FUNCTIONAL_REQUEST,
@@ -178,10 +218,23 @@ class LiveDataPoller(
         )
 
         while (true) {
-            if (matches(response, pid)) return response.copyOfRange(2, response.size)
+            if (matches(response, pid)) {
+                return Answer.Value(response.copyOfRange(2, response.size))
+            }
+            // "I do not have that" is an answer, and waiting out the timeout
+            // after receiving one is how a sweep of forty parameters took
+            // forty seconds. The module replies 7F 01 31 in about fifty
+            // milliseconds; the poller then sat for the remaining 950 and did
+            // it again for every parameter this engine does not have.
+            //
+            // Worse than slow: during that second a late reply to the previous
+            // parameter arrives and is consumed by the wrong request, and the
+            // sweep walks out of step and stays out of step. That is why
+            // parameters the vehicle definitely supports were also blank.
+            if (isRefusal(response)) return Answer.Refused
 
             val remaining = deadline - System.currentTimeMillis()
-            if (remaining <= 0) return null
+            if (remaining <= 0) return Answer.NoAnswer
             response = channel.receive(VehicleProfiles.OBD_RESPONSE_RANGE_START, remaining)
         }
     }
@@ -189,4 +242,22 @@ class LiveDataPoller(
     /** A positive mode 01 reply echoing the parameter that was asked for. */
     private fun matches(response: ByteArray, pid: Int): Boolean =
         response.size >= 3 && response.u8(0) == 0x41 && response.u8(1) == pid
+
+    /**
+     * A negative response to mode 01, which for a parameter means "not on this
+     * vehicle" and is not going to change while the engine is running.
+     */
+    private fun isRefusal(response: ByteArray): Boolean =
+        response.size >= 2 && response.u8(0) == 0x7F && response.u8(1) == 0x01
+
+    private sealed interface Answer {
+        /** The reply, with the mode and parameter echo stripped. */
+        class Value(val payload: ByteArray) : Answer
+
+        /** The module said it does not have this parameter. */
+        data object Refused : Answer
+
+        /** Nothing usable arrived before the deadline. */
+        data object NoAnswer : Answer
+    }
 }
