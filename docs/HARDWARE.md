@@ -129,6 +129,11 @@ Two things were tested that this project had asserted without evidence:
 - `ATRV` works but is **not** a liveness test: it read 10.0 V on a truck whose
   PCM was answering, and 11.7 V on one that was asleep. Only asking a module
   something tells you the vehicle is awake.
+- It is worth reading for its own sake, though. That 10.0 V was a battery on its
+  way to flat, and the tool used the number only to decide whether the vehicle
+  would reply. The truck did not start afterwards. The drain turned out to be
+  the headlights rather than the diagnostic session - which is the argument for
+  warning on the voltage rather than on what you think is drawing it.
 - `ATST` is confirmed: `ATST 05` gave up on a miss in 49 ms, `ATST FF` in
   1069 ms — 255 × 4 ms, as documented.
 - `ATCAF` ambiguity is confirmed on hardware. `0103` with auto-formatting **on**

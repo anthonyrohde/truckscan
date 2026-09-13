@@ -124,10 +124,12 @@ private fun ConnectedCard(state: ConnectionState.Connected, viewModel: ScanViewM
                 )
             }
 
-            // The warning this app owes the user. A session runs with the
-            // ignition on and the engine off, and forty minutes of that took a
-            // 6.7 diesel from 11.7 V to 10.0 V and left it unable to start,
-            // with the voltage on screen the whole time and nothing said.
+            // The warning this app owes the user. With the engine off the
+            // battery is only being drawn down - by this app, and by anything
+            // else left switched on, which on the occasion that prompted this
+            // was the headlights. The app watched a 6.7 diesel reach 10.0 V
+            // with its modules still answering and said nothing, and it did not
+            // need to know the cause to have been useful.
             state.batteryVolts?.let { volts ->
                 if (BatteryVoltage.classify(volts) != BatteryVoltage.State.CHARGING &&
                     BatteryVoltage.classify(volts) != BatteryVoltage.State.HEALTHY

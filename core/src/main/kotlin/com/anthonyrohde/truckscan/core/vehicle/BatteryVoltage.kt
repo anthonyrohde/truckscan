@@ -5,12 +5,16 @@ package com.anthonyrohde.truckscan.core.vehicle
  *
  * ## Why this exists
  *
- * A diagnostic session runs with the ignition on and the engine off, which is
- * a steady drain with nothing replacing it. On a 6.7 diesel that is not a small
- * one. During four probe runs over about forty minutes this project watched
- * `ATRV` fall to 10.0 V with the PCM still answering, said nothing about it,
- * and the truck would not start afterwards. The number was on the screen the
- * whole time.
+ * With the engine off the battery is only being drawn down: by a diagnostic
+ * session, and by anything else left switched on. On the occasion that prompted
+ * this, the session was blamed and the headlights turned out to be the real
+ * drain - which is exactly why the warning is worth having. It does not need to
+ * know what is drawing the current.
+ *
+ * What this project actually did was watch `ATRV` fall to 10.0 V with the PCM
+ * still answering, use the number only to decide whether the truck was awake
+ * enough to reply, and say nothing about it. The truck would not start
+ * afterwards. The number was on the screen the whole time.
  *
  * So the rule here is that voltage is never just logged. It is classified, it
  * is compared against where it started, and when it is heading somewhere bad

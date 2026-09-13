@@ -12,11 +12,13 @@
 
   Nothing is installed to run it. System.IO.Ports ships with Windows.
 
-  RUN WITH THE ENGINE RUNNING where the work allows it. A session with the
-  ignition on and the engine off is a steady drain: four runs over forty
-  minutes took a 6.7 diesel from 11.7 V to 10.0 V and it would not start
-  afterwards. This reads the battery before and after every run and refuses
-  to start below 11.5 V unless given -IgnoreBattery.
+  RUN WITH THE ENGINE RUNNING where the work allows it. With the engine off
+  the battery is only being drawn down, by this and by anything else left
+  switched on - a 6.7 diesel reached 10.0 V with its modules still answering,
+  and the tool had that number on screen the whole time without saying
+  anything about it. This reads the battery before and after every run and
+  refuses to start below 11.5 V unless given -IgnoreBattery. It does not need
+  to know what the drain is to be useful.
 
   READ-ONLY. Every frame is checked against a list of UDS and OBD services that
   change nothing, and anything else is refused and never sent - no module reset,
@@ -220,13 +222,14 @@ function Format-Reply {
 
 # ---------------------------------------------------------------- battery
 
-# A diagnostic session runs with the ignition on and the engine off. That is a
-# steady drain with nothing replacing it, and on a 6.7 diesel it is not small.
-# Four runs over about forty minutes took this truck from 11.7 V to 10.0 V and
-# it would not start afterwards. The number was on screen the whole time and
-# nothing said anything about it.
+# With the engine off the battery is only being drawn down - by a diagnostic
+# session, and by anything else left switched on, which on the occasion that
+# prompted this was the headlights. This truck reached 10.0 V with its modules
+# still answering, and the tool had that number on screen the whole time and
+# said nothing about it.
 #
-# So: read it before, read it after, and say what happened in words.
+# The cause does not matter to the warning, which is the point: read it before,
+# read it after, and say what happened in words.
 
 $WillNotStartVolts = 11.0
 $ModulesUnreliableVolts = 11.5
@@ -286,7 +289,7 @@ $Investigations = @{
 # reported silence, with and without a receive filter - the gateway in
 # front of the OBD port routes diagnostic traffic on request and does
 # not mirror the internal buses. Kept because another vehicle may
-# answer differently. Engine running if the work allows it. Ignition on with the engine off is a steady drain - forty minutes of it took this truck from 11.7 V to 10.0 V and it would not start afterwards.
+# answer differently. Engine running if the work allows it. With the engine off the battery is only being drawn down, and this truck reached 10.0 V while its modules were still answering.
 ATZ
 ATE0
 ATH1
@@ -552,7 +555,7 @@ STP 06
 # READ SECTION A FIRST. If the truck is asleep the whole run is void, which is
 # exactly what happened to the last MS-CAN run.
 #
-# Engine running if the work allows it. Ignition on with the engine off is a steady drain - forty minutes of it took this truck from 11.7 V to 10.0 V and it would not start afterwards. Engine running is better still - ATRV will say which.
+# Engine running if the work allows it. With the engine off the battery is only being drawn down, and this truck reached 10.0 V while its modules were still answering. Engine running is better still - ATRV will say which.
 
 # ============================================================ A. is it awake
 # ATRV is the adapter's own voltmeter and needs no bus at all.
@@ -988,7 +991,7 @@ ATZ
 #   CAN ERROR                -> still not reaching the bus
 #
 # One NO DATA anywhere below is already the headline: it would mean the
-# adapter is on pins 3/11 for the first time. Engine running if the work allows it. Ignition on with the engine off is a steady drain - forty minutes of it took this truck from 11.7 V to 10.0 V and it would not start afterwards.
+# adapter is on pins 3/11 for the first time. Engine running if the work allows it. With the engine off the battery is only being drawn down, and this truck reached 10.0 V while its modules were still answering.
 
 ATZ
 ATE0
@@ -1044,7 +1047,7 @@ ATCRA 7E8
         Body  = @'
 # Asks the PCM for a part number - a reply too long for one frame - then
 # grants the transfer. What follows the flow control line is the
-# evidence: consecutive frames, or nothing. Engine running if the work allows it. Ignition on with the engine off is a steady drain - forty minutes of it took this truck from 11.7 V to 10.0 V and it would not start afterwards.
+# evidence: consecutive frames, or nothing. Engine running if the work allows it. With the engine off the battery is only being drawn down, and this truck reached 10.0 V while its modules were still answering.
 ATZ
 ATE0
 ATH1
@@ -1066,7 +1069,7 @@ ATCRA 7E8
 # the protocol brought up by a real request first, and STN chipsets have
 # their own monitor command, STM, which the app never tries.
 #
-# This proves the bus is alive, then tries both. Engine running if the work allows it. Ignition on with the engine off is a steady drain - forty minutes of it took this truck from 11.7 V to 10.0 V and it would not start afterwards.
+# This proves the bus is alive, then tries both. Engine running if the work allows it. With the engine off the battery is only being drawn down, and this truck reached 10.0 V while its modules were still answering.
 ATZ
 ATE0
 ATH1
@@ -1165,8 +1168,8 @@ try {
     if ($serial.BytesToRead -gt 0) { [void] $serial.ReadExisting() }
 
     # Before anything else. ATRV needs no bus, no protocol and no vehicle, so
-    # there is no reason not to know this before spending forty minutes of
-    # someone's battery.
+    # there is no reason not to know this before spending an hour of someone's
+    # battery.
     $serial.Write("ATE0`r")
     [void] (Read-Reply -SerialPort $serial -TimeoutMs 2000)
     $startVolts = Read-BatteryVolts -SerialPort $serial
