@@ -154,11 +154,30 @@ class ModuleDiscovery(
         bus: CanBus,
         onProgress: ((DiscoveryProgress) -> Unit)? = null,
     ): List<DiscoveredModule> {
+        // Every known address, not just the ones whose profile lists this bus.
+        //
+        // `expectedBuses` says where a module physically sits in the loom, and
+        // using it to decide where to look was wrong. On a 2022 F-250 the
+        // gateway presents modules on the powertrain bus regardless: the parking
+        // aid module and the SYNC module are documented as MS-CAN and HS-CAN2,
+        // and both answer on HS-CAN1 - measured, with a TesterPresent to 736 and
+        // 7D0 returning 73E and 7D8. Filtering by the profile meant a quick scan
+        // never asked, so they could not be found on the only bus that can reach
+        // them.
+        //
+        // Twenty-odd addresses instead of ten is a second of scanning. Not
+        // asking is a module that does not exist as far as the app is concerned.
         val addresses = VehicleProfiles.SUPER_DUTY_2022
-            .filter { bus in it.expectedBuses }
             .map { it.requestId }
             .distinct()
-        return scanBus(bus, addresses, onProgress = onProgress)
+        // A more generous wait than the full sweep uses, because the cost of
+        // waiting is per address and there are twenty-odd here rather than 256.
+        // Measured on the truck: a module answers in 56-64 ms and an empty
+        // address is ruled out in 120-137 ms, so 150 was only about twice the
+        // observed answer time. That is a thin margin on a bus with an engine
+        // running on it, and the penalty for being wrong is a module that
+        // silently does not exist.
+        return scanBus(bus, addresses, probeTimeoutMillis = 300, onProgress = onProgress)
     }
 
     /**

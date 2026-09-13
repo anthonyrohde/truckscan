@@ -160,4 +160,47 @@ class PhantomModuleTest {
         )
         assertEquals(emptyList<DiscoveredModule>(), found)
     }
+
+    /**
+     * A quick scan must ask every known address, not only the ones the profile
+     * associates with the bus being scanned.
+     *
+     * Measured on a 2022 F-250: the parking aid module (736) and the SYNC module
+     * (7D0) answer on HS-CAN1, through the gateway, while the profile documents
+     * them as MS-CAN and HS-CAN2. Filtering by the profile meant a quick scan of
+     * HS-CAN1 never asked, so they were unfindable on the only bus that reaches
+     * them - and the scan reported two modules where the bus has five.
+     */
+    @Test
+    fun `a quick scan asks every known address regardless of the profile's bus`() = runBlocking {
+        val asked = mutableListOf<Int>()
+        val transport = object : ObdTransport {
+            private val pending = ArrayDeque<String>()
+            override val isOpen = true
+            override val description = "address recorder"
+            override suspend fun open() = Unit
+            override suspend fun close() = Unit
+            override suspend fun write(bytes: ByteArray) {
+                val cmd = String(bytes, Charsets.US_ASCII).trim()
+                if (cmd.isEmpty()) return
+                if (cmd.startsWith("ATSH")) {
+                    cmd.removePrefix("ATSH").trim().toIntOrNull(16)?.let { asked += it }
+                }
+                pending += if (cmd.startsWith("AT") || cmd.startsWith("ST")) "OK\r>" else "NO DATA\r>"
+            }
+            override suspend fun read(timeoutMillis: Long): ByteArray {
+                if (pending.isEmpty()) return ByteArray(0)
+                return pending.removeFirst().toByteArray(Charsets.US_ASCII)
+            }
+        }
+        val adapter = ElmAdapter(transport)
+        ModuleDiscovery(adapter, IsoTpChannel(adapter)).quickScan(CanBus.HS_CAN1)
+
+        for (address in listOf(0x7E0, 0x7E1, 0x726, 0x736, 0x7D0)) {
+            assertTrue(
+                address in asked,
+                "%03X answers on this truck's powertrain bus and was never asked".format(address),
+            )
+        }
+    }
 }
