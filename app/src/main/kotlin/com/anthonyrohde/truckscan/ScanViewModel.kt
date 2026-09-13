@@ -572,6 +572,8 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         val monitorsNotRun = scan?.results.orEmpty().sumOf { it.notRunCount }
+        val faultScanModuleCount = scan?.results?.size ?: 0
+        val unreadableModuleCount = errorsByCode.size
 
         return DiagnosticReport(
             generatedAtMillis = System.currentTimeMillis(),
@@ -592,6 +594,8 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             moduleScan = lastModuleScan,
             faults = faultLines,
             monitorsNotRun = monitorsNotRun,
+            faultScanModuleCount = faultScanModuleCount,
+            unreadableModuleCount = unreadableModuleCount,
             supportedPidCount = supportedPidCount,
             parametersOffered = _availablePids.value.size,
             parametersWatched = streamingPids.size.takeIf { it > 0 }

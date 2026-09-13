@@ -80,6 +80,12 @@ class DiagnosticReportTest {
         timing: LiveHealth.SweepTiming = LiveHealth.SweepTiming(0, 0, 0, 0, 0),
         faults: List<String> = emptyList(),
         monitorsNotRun: Int = 0,
+        // A fault scan was run against this many modules. Left at 0 means
+        // "never scanned", which several tests below deliberately exercise;
+        // anything that supplies faults or a monitor count should also say a
+        // scan happened, or it is testing a state that cannot occur.
+        faultScanModuleCount: Int = 0,
+        unreadableModuleCount: Int = 0,
     ) = DiagnosticReport(
         generatedAtMillis = 1_757_000_000_000,
         appVersion = "1.0.0 (build 2)",
@@ -94,6 +100,8 @@ class DiagnosticReportTest {
         moduleScan = moduleScan,
         faults = faults,
         monitorsNotRun = monitorsNotRun,
+        faultScanModuleCount = faultScanModuleCount,
+        unreadableModuleCount = unreadableModuleCount,
         supportedPidCount = 67,
         parametersOffered = 45,
         parametersWatched = 5,
@@ -247,6 +255,7 @@ class DiagnosticReportTest {
                 "APIM  U3003:16  Battery voltage out of range [confirmed]",
             ),
             monitorsNotRun = 341,
+            faultScanModuleCount = 4,
         )
 
         assertTrue(text.contains("B156B:15"), text)
@@ -263,7 +272,38 @@ class DiagnosticReportTest {
     @Test
     fun `a clean module says nothing about monitors it did not have to count`() {
         assertFalse(report().contains("further record"))
-}
+    }
+
+    /**
+     * The actual bug, reproduced on a real truck: a fault scan ran, one of
+     * four modules answered clean and three could not be read, and the report
+     * said "None recorded, or no scan has been run" - indistinguishable from
+     * never having scanned at all. An empty faults list means three different
+     * things and each needs its own sentence.
+     */
+    @Test
+    fun `never scanned, scanned clean, and scanned with unreadable modules all read differently`() {
+        val neverScanned = report()
+        assertTrue(neverScanned.contains("None recorded, or no scan has been run"), neverScanned)
+
+        val scannedClean = report(faultScanModuleCount = 4)
+        assertFalse(scannedClean.contains("no scan has been run"), scannedClean)
+        assertTrue(scannedClean.contains("No faults in the modules that were read"), scannedClean)
+
+        val partiallyUnreadable = report(faultScanModuleCount = 4, unreadableModuleCount = 3)
+        assertTrue(
+            partiallyUnreadable.contains("No faults in the modules that were read"),
+            "the one module that did answer clean must still be reported: $partiallyUnreadable",
+        )
+        assertTrue(
+            partiallyUnreadable.contains("3 module(s) could not be read"),
+            partiallyUnreadable,
+        )
+        assertTrue(
+            partiallyUnreadable.contains("not a clean bill of health"),
+            partiallyUnreadable,
+        )
+    }
 
 class DiagnosticReportSelectionTest {
 

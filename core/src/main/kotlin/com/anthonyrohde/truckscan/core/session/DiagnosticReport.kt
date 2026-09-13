@@ -48,6 +48,19 @@ data class DiagnosticReport(
      * whose entire purpose is to be read by someone looking for a problem.
      */
     val monitorsNotRun: Int = 0,
+    /**
+     * How many modules a fault scan actually attempted to read.
+     *
+     * Needed to tell "nobody has run a scan" apart from "a scan ran and
+     * everything it could read was clean" - both show up as an empty
+     * [faults] list otherwise, and they call for opposite conclusions. A
+     * report that said "None recorded, or no scan has been run" after a scan
+     * had in fact run and found three of four modules unreadable is the exact
+     * failure this exists to prevent, and it happened.
+     */
+    val faultScanModuleCount: Int = 0,
+    /** Modules the fault scan could not read at all. See [ModuleDtcResult.error]. */
+    val unreadableModuleCount: Int = 0,
     val supportedPidCount: Int?,
     val parametersOffered: Int,
     /** What the live stream is actually polling. */
@@ -149,10 +162,21 @@ data class DiagnosticReport(
         }
 
         heading("FAULT CODES")
-        if (faults.isEmpty()) {
+        if (faultScanModuleCount == 0) {
             appendLine("  None recorded, or no scan has been run.")
         } else {
-            faults.forEach { appendLine("  $it") }
+            if (faults.isEmpty()) {
+                appendLine("  No faults in the modules that were read.")
+            } else {
+                faults.forEach { appendLine("  $it") }
+            }
+            if (unreadableModuleCount > 0) {
+                appendLine()
+                appendLine(
+                    "  $unreadableModuleCount module(s) could not be read, so this is " +
+                        "not a clean bill of health.",
+                )
+            }
         }
         if (monitorsNotRun > 0) {
             appendLine()

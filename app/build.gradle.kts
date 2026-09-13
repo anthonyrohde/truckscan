@@ -24,8 +24,8 @@ android {
         // versionCode must increase for every release; Android refuses to
         // install a lower code over a higher one. It starts at 2 because the
         // rolling debug build already went out as 1.
-        versionCode = 11
-        versionName = "1.0.9"
+        versionCode = 12
+        versionName = "1.0.10"
     }
 
     // Release signing, driven entirely by environment variables.
