@@ -141,6 +141,11 @@ class ElmAdapter(
             stnIdentifier = sti,
             deviceDescription = desc,
         )
+        // The transport names the line rate it settled on. Worth a line in the
+        // log: a link established at the wrong rate looks identical to a dead
+        // vehicle from every screen in the app, and this is what tells them
+        // apart at a glance.
+        log("Transport: ${transport.description}")
         log("Connected to ${identity.model} (multi-bus: ${identity.supportsMultiBus})")
         identity
     }

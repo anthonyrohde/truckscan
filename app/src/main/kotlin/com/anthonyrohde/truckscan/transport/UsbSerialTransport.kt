@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.hardware.usb.UsbManager
+import com.anthonyrohde.truckscan.core.adapter.AdapterProbe
 import com.anthonyrohde.truckscan.core.transport.ObdTransport
 import com.anthonyrohde.truckscan.core.transport.TransportClosedException
 import com.anthonyrohde.truckscan.core.transport.TransportException
@@ -67,9 +68,20 @@ class UsbSerialTransport(
         try {
             val serialPort = driver.ports.first()
             serialPort.open(connection)
-            negotiatedBaudRate = negotiateBaudRate(serialPort)
             serialPort.dtr = true
             serialPort.rts = true
+            val rate = negotiateBaudRate(serialPort)
+            if (rate == null) {
+                // Leave nothing open behind us: a port still held here cannot
+                // be reopened, so the retry the message asks for would fail
+                // for a different reason than the one that caused it.
+                runCatching { serialPort.close() }
+                throw TransportException(
+                    "$description is plugged in but did not answer at any line " +
+                        "rate. Unplug it, plug it back in, and try again.",
+                )
+            }
+            negotiatedBaudRate = rate
             port = serialPort
         } catch (e: IOException) {
             runCatching { port?.close() }
@@ -103,22 +115,29 @@ class UsbSerialTransport(
     }
 
     /**
-     * Picks the fastest line rate the driver will accept.
+     * Finds the line rate the adapter is actually speaking, by asking it.
      *
-     * The OBDLink EX advertises 2,000 kbit/s, so the 115,200 this used to
-     * hardcode left most of the link on the table. Rather than swap one guess
-     * for another, this tries the candidates highest first and keeps the first
-     * that is accepted.
+     * The previous version set a rate and treated setParameters() returning
+     * without throwing as proof it worked. It is not. On a CDC virtual COM
+     * port that call only sends a line-coding request, and the device is free
+     * to ignore it - so the first and fastest candidate was always "accepted"
+     * and the link was left at 2 Mbit/s talking to an adapter sitting at its
+     * power-up default. Every response came back empty, which surfaced as
+     * "Unknown adapter" and, because no STN identity could be read, as an
+     * adapter with no multi-bus support.
      *
-     * Two things make that safe. On a CDC virtual COM port the rate is
-     * negotiated by USB itself and the setting is effectively advisory, so a
-     * high value costs nothing. On a real UART bridge an unsupported rate is
-     * rejected outright, and we fall through to the next candidate. Either way
-     * 115,200 remains the floor, which is the rate every adapter accepts.
+     * The only reliable test is whether the adapter answers. ATI is the right
+     * probe: every ELM327 and every clone implements it, it changes no state,
+     * and its reply is recognisable.
+     *
+     * 115,200 is tried first because that is where ELM327 and STN adapters
+     * power up. Going faster is a separate step - an STN moves only when told
+     * to with STBR, and both ends must switch together - so it is not
+     * something to attempt by guessing at the host end.
      */
-    private fun negotiateBaudRate(serialPort: UsbSerialPort): Int {
+    private fun negotiateBaudRate(serialPort: UsbSerialPort): Int? {
         for (candidate in BAUD_CANDIDATES) {
-            val accepted = runCatching {
+            val configured = runCatching {
                 serialPort.setParameters(
                     candidate,
                     DATA_BITS,
@@ -126,11 +145,52 @@ class UsbSerialTransport(
                     UsbSerialPort.PARITY_NONE,
                 )
             }.isSuccess
-            if (accepted) return candidate
+            if (!configured) continue
+            if (respondsToProbe(serialPort)) return candidate
         }
-        // Nothing was accepted; report the floor and let the first read or
-        // write surface the real problem with a useful message.
-        return BAUD_CANDIDATES.last()
+        // Nothing answered at any rate. Say so, rather than reporting a
+        // successful connection to an adapter that is not talking - which is
+        // what the old code did, and it looked exactly like a dead vehicle.
+        runCatching {
+            serialPort.setParameters(
+                DEFAULT_BAUD,
+                DATA_BITS,
+                UsbSerialPort.STOPBITS_1,
+                UsbSerialPort.PARITY_NONE,
+            )
+        }
+        return null
+    }
+
+    /** True when the adapter answers ATI at the rate currently configured. */
+    private fun respondsToProbe(serialPort: UsbSerialPort): Boolean = runCatching {
+        // Discard whatever the previous rate left in the buffers, or a partial
+        // frame read as garbage will be mistaken for a reply. Not every driver
+        // implements the hardware purge, so the read-drain below is what this
+        // actually relies on.
+        runCatching { serialPort.purgeHwBuffers(true, true) }
+        drain(serialPort)
+
+        serialPort.write("\r".toByteArray(), PROBE_WRITE_TIMEOUT_MS)
+        drain(serialPort)
+        serialPort.write("ATI\r".toByteArray(), PROBE_WRITE_TIMEOUT_MS)
+
+        // Collect briefly rather than taking the first read: a reply can
+        // arrive split across packets.
+        val reply = StringBuilder()
+        val deadline = System.currentTimeMillis() + PROBE_WINDOW_MS
+        while (System.currentTimeMillis() < deadline) {
+            val n = serialPort.read(readBuffer, PROBE_READ_TIMEOUT_MS)
+            if (n > 0) reply.append(String(readBuffer, 0, n, Charsets.US_ASCII))
+            if (reply.contains('>')) break
+        }
+        AdapterProbe.looksLikeAdapter(reply.toString())
+    }.getOrDefault(false)
+
+    private fun drain(serialPort: UsbSerialPort) {
+        while (serialPort.read(readBuffer, PROBE_READ_TIMEOUT_MS) > 0) {
+            // Discard.
+        }
     }
 
     companion object {
@@ -140,29 +200,17 @@ class UsbSerialTransport(
          * 2 Mbit/s is what the OBDLink EX advertises; the intermediate steps
          * cover bridges that cap lower, and 115,200 is the universal floor.
          */
-        private val BAUD_CANDIDATES = listOf(2_000_000, 1_000_000, 500_000, 115_200)
+        private val BAUD_CANDIDATES =
+            listOf(115_200, 2_000_000, 1_000_000, 500_000, 38_400, 9_600)
 
         private const val DATA_BITS = 8
         private const val WRITE_TIMEOUT_MS = 2_000
 
-        private const val ACTION_USB_PERMISSION = "com.anthonyrohde.truckscan.USB_PERMISSION"
+        /** Where ELM327 and STN adapters power up, and the fallback. */
+        private const val DEFAULT_BAUD = 115_200
 
-        /** Adapters currently attached. */
-        fun findDrivers(context: Context): List<UsbSerialDriver> {
-            val manager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-            return UsbSerialProber.getDefaultProber().findAllDrivers(manager)
-        }
-
-        /** Asks Android for permission to talk to [driver]. */
-        fun requestPermission(context: Context, driver: UsbSerialDriver) {
-            val manager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-            val intent = PendingIntent.getBroadcast(
-                context,
-                0,
-                Intent(ACTION_USB_PERMISSION).setPackage(context.packageName),
-                PendingIntent.FLAG_IMMUTABLE,
-            )
-            manager.requestPermission(driver.device, intent)
-        }
+        private const val PROBE_WRITE_TIMEOUT_MS = 500
+        private const val PROBE_READ_TIMEOUT_MS = 120
+        private const val PROBE_WINDOW_MS = 400L
     }
 }
