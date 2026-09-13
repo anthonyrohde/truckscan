@@ -428,7 +428,35 @@ class ElmAdapter(
         return readUntilPrompt(timeoutMillis).copy(command = cmd)
     }
 
+    /**
+     * Bytes discarded because they arrived after the exchange that asked for
+     * them had already ended. Exposed so a diagnostic report can say how often
+     * this vehicle overruns rather than leaving it in the log.
+     */
+    var staleBytesDiscarded: Int = 0
+        private set
+
     private suspend fun writeLine(cmd: String) {
+        // Anything still in the buffer when a new command starts belongs to the
+        // previous exchange, which has already been answered and returned.
+        //
+        // This is the fault behind phantom modules. readUntilPrompt checks the
+        // buffer for a prompt BEFORE reading the port, so a leftover response
+        // was handed straight back as the reply to the next command - instantly,
+        // without waiting. One late reply from a real module therefore put every
+        // subsequent request one behind, and a scan reported modules at
+        // consecutive addresses that do not exist, each one having been shown
+        // the previous address's answer.
+        //
+        // Discarding is the only correct choice: the data is an answer to a
+        // question that has been closed. Keeping it would attribute one module's
+        // reply to another, which is how the fault started.
+        if (buffer.isNotEmpty()) {
+            val stale = buffer.toString()
+            staleBytesDiscarded += stale.length
+            buffer.setLength(0)
+            log("discarded ${stale.length} stale byte(s) before '$cmd': ${stale.trim()}")
+        }
         if (cmd.isNotEmpty()) log(">> $cmd")
         transport.write((cmd + "\r").toByteArray(Charsets.US_ASCII))
     }

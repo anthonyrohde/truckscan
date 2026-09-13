@@ -4,6 +4,7 @@ import com.anthonyrohde.truckscan.core.adapter.AdapterResponse
 import com.anthonyrohde.truckscan.core.adapter.CanFrame
 import com.anthonyrohde.truckscan.core.adapter.ElmAdapter
 import com.anthonyrohde.truckscan.core.transport.TransportException
+import com.anthonyrohde.truckscan.core.util.Hex
 import com.anthonyrohde.truckscan.core.util.toHex
 import kotlinx.coroutines.delay
 
@@ -88,7 +89,35 @@ class IsoTpChannel(
             sendSegmented(frames, timeoutMillis)
         }
 
-        return reassemble(replyFrames, timeoutMillis)
+        return reassemble(ours(replyFrames, rxId), timeoutMillis, rxId)
+    }
+
+    /**
+     * Keeps only the frames that came from the address this exchange is with.
+     *
+     * The adapter's own receive filter should have done this, and usually has.
+     * What it cannot do is unsend a frame that was already in flight when the
+     * filter changed: that frame is sitting in the serial buffer, and the next
+     * command reads it as its own reply.
+     *
+     * On a truck that produced 52 modules at consecutive addresses - 755, 756,
+     * 757 and on - none of which exist. Each request was being shown the
+     * previous address's answer, so a scan that met one slow module reported a
+     * module at every address after it. Consecutive addresses are the signature:
+     * a real vehicle does not fill a block.
+     *
+     * Checking the identifier is the only defence that does not depend on the
+     * adapter or the operating system's buffering, because the expected
+     * identifier is the one piece of information this layer definitely has.
+     */
+    private fun ours(frames: List<CanFrame>, rxId: Int): List<CanFrame> {
+        if (frames.all { it.id == rxId }) return frames
+        val (mine, strays) = frames.partition { it.id == rxId }
+        log(
+            "Discarded ${strays.size} frame(s) not from ${Hex.encode(rxId, 3)}: " +
+                strays.joinToString(" ") { it.toString() },
+        )
+        return mine
     }
 
     /**
@@ -115,7 +144,7 @@ class IsoTpChannel(
         if (frames.isEmpty()) {
             throw IsoTpException("Timed out waiting for a deferred response from the module.")
         }
-        return reassemble(frames, timeoutMillis)
+        return reassemble(ours(frames, rxId), timeoutMillis, rxId)
     }
 
     /**
@@ -258,12 +287,22 @@ class IsoTpChannel(
      *
      * So: drain, and only if the message is still incomplete ask for the rest.
      */
-    private suspend fun reassemble(initial: List<CanFrame>, timeoutMillis: Long): ByteArray {
+    private suspend fun reassemble(
+        initial: List<CanFrame>,
+        timeoutMillis: Long,
+        rxId: Int,
+    ): ByteArray {
+        if (initial.isEmpty()) {
+            throw IsoTpException(
+                "Nothing arrived from ${Hex.encode(rxId, 3)}. Any frames that did " +
+                    "arrive came from another address and were not this module's reply.",
+            )
+        }
         val assembler = IsoTpAssembler()
         val queue = ArrayDeque(initial)
 
         try {
-            return reassembleLoop(assembler, queue, timeoutMillis) { }
+            return reassembleLoop(assembler, queue, timeoutMillis, rxId) { }
         } finally {
             // Whatever is left belongs to the next message.
             carried.addAll(queue)
@@ -274,6 +313,7 @@ class IsoTpChannel(
         assembler: IsoTpAssembler,
         queue: ArrayDeque<CanFrame>,
         timeoutMillis: Long,
+        rxId: Int,
         onFlowControlSent: () -> Unit,
     ): ByteArray {
         var flowControlSent = false
@@ -320,8 +360,9 @@ class IsoTpChannel(
                 val alongside = sendFlowControl()
                 flowControlSent = true
                 onFlowControlSent()
-                if (alongside.isNotEmpty()) {
-                    queue.addAll(alongside)
+                val mine = ours(alongside, rxId)
+                if (mine.isNotEmpty()) {
+                    queue.addAll(mine)
                     continue
                 }
             }
@@ -332,7 +373,7 @@ class IsoTpChannel(
             val window = (config.consecutiveTimeoutMillis + extra)
                 .coerceAtMost(timeoutMillis + 10_000)
 
-            val more = adapter.collectFrames(window)
+            val more = ours(adapter.collectFrames(window), rxId)
             if (more.isEmpty()) {
                 throw IsoTpException(
                     "Incomplete reply: got ${assembler.receivedLength} of " +
