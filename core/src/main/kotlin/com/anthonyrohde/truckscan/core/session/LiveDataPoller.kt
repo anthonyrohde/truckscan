@@ -50,6 +50,14 @@ class LiveDataPoller(
     private val busRouter: BusRouter? = null,
     private val logger: ((String) -> Unit)? = null,
 ) {
+    private companion object {
+        /**
+         * How long one parameter may take, including waiting past replies that
+         * belong to something else.
+         */
+        const val PID_TIMEOUT_MS = 1_000L
+    }
+
     /**
      * Asks the vehicle which mode 01 parameters it supports.
      *
@@ -140,18 +148,45 @@ class LiveDataPoller(
      * Requests a single mode 01 parameter.
      *
      * Strips the echoed mode and PID bytes so the caller gets just the value
-     * payload. A reply whose echo does not match is discarded rather than
-     * decoded, since on a shared bus it belongs to a different request.
+     * payload.
      */
-    private suspend fun requestPid(pid: Int): ByteArray? = runCatching {
-        val response = channel.request(
+    private suspend fun requestPid(pid: Int): ByteArray? =
+        runCatching { readParameter(pid) }.getOrNull()
+
+    /**
+     * Sends the request and waits for the reply that answers it.
+     *
+     * A reply that is not the one asked for is not a failure. Requests go to
+     * the functional address, so more than one module may answer, and a late
+     * answer to the previous parameter can arrive first. Giving up on the first
+     * mismatch - which is what this used to do - means one late reply knocks
+     * the sweep out of step and it stays out of step: each request reads the
+     * previous one's answer and discards it. That is the stutter, with sweeps
+     * stretching from half a second to three while parameters drop out in
+     * rotation.
+     *
+     * So: keep reading until the matching echo turns up or the deadline passes.
+     * Nothing is re-sent, because the answer is already on its way.
+     */
+    private suspend fun readParameter(pid: Int): ByteArray? {
+        val deadline = System.currentTimeMillis() + PID_TIMEOUT_MS
+        var response = channel.request(
             VehicleProfiles.OBD_FUNCTIONAL_REQUEST,
             VehicleProfiles.OBD_RESPONSE_RANGE_START,
             byteArrayOf(0x01, pid.toByte()),
-            1_000,
+            PID_TIMEOUT_MS,
         )
-        if (response.size < 3) return@runCatching null
-        if (response.u8(0) != 0x41 || response.u8(1) != pid) return@runCatching null
-        response.copyOfRange(2, response.size)
-    }.getOrNull()
+
+        while (true) {
+            if (matches(response, pid)) return response.copyOfRange(2, response.size)
+
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0) return null
+            response = channel.receive(VehicleProfiles.OBD_RESPONSE_RANGE_START, remaining)
+        }
+    }
+
+    /** A positive mode 01 reply echoing the parameter that was asked for. */
+    private fun matches(response: ByteArray, pid: Int): Boolean =
+        response.size >= 3 && response.u8(0) == 0x41 && response.u8(1) == pid
 }

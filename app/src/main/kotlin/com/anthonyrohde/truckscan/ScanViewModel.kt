@@ -9,6 +9,7 @@ import com.anthonyrohde.truckscan.core.pid.Pid
 import com.anthonyrohde.truckscan.core.pid.PidCatalog
 import com.anthonyrohde.truckscan.core.pid.PidValue
 import com.anthonyrohde.truckscan.core.session.LiveRecording
+import com.anthonyrohde.truckscan.core.session.LiveValueHold
 import com.anthonyrohde.truckscan.core.pid.ZoneSeverity
 import com.anthonyrohde.truckscan.core.session.ConnectionState
 import com.anthonyrohde.truckscan.core.session.DiagnosticEngine
@@ -94,11 +95,22 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
      */
     private var recording: LiveRecording? = null
 
+    /**
+     * Last known reading per parameter, so a gauge does not empty because one
+     * sweep missed it. Reset whenever a new stream starts, since values from a
+     * previous session say nothing about this one.
+     */
+    private var hold = LiveValueHold()
+
     private val _recordedRows = MutableStateFlow(0)
     val recordedRows: StateFlow<Int> = _recordedRows.asStateFlow()
 
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
+
+    /** Parameters whose last reading is old enough to distrust. */
+    private val _staleKeys = MutableStateFlow<Set<String>>(emptySet())
+    val staleKeys: StateFlow<Set<String>> = _staleKeys.asStateFlow()
 
     private val _alerts = MutableStateFlow<List<PidValue>>(emptyList())
     val alerts: StateFlow<List<PidValue>> = _alerts.asStateFlow()
@@ -267,21 +279,21 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         stopLiveData()
+        hold = LiveValueHold()
+        _staleKeys.value = emptySet()
         liveDataJob = viewModelScope.launch {
             try {
                 active.liveData.stream(pids, intervalMillis = 200)
                     .collect { sample ->
-                        _liveSample.value = sample
-                        _alerts.value = sample.values.values
-                            .filter { it.severity != ZoneSeverity.NORMAL }
-                            .sortedByDescending { it.severity.ordinal }
-
+                        // Recording gets the raw sweep and the screen gets the
+                        // held one. A log is a record of what was measured, so
+                        // repeating a held reading into it would turn one
+                        // measurement into fifty; a gauge is a display of what
+                        // is true now, and blanking it because a single request
+                        // missed says something false.
                         if (_isRecording.value) {
                             val active = recording
                             if (active != null && !active.add(sample)) {
-                                // Full. Stop rather than silently dropping the
-                                // rest, so what is saved matches what the
-                                // counter said.
                                 _isRecording.value = false
                                 _message.value =
                                     "Recording stopped: reached ${active.rowCount} rows. " +
@@ -289,6 +301,13 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                             }
                             _recordedRows.value = active?.rowCount ?: 0
                         }
+
+                        val shown = sample.copy(values = hold.accept(sample))
+                        _liveSample.value = shown
+                        _staleKeys.value = hold.staleKeys(sample.timestampMillis)
+                        _alerts.value = shown.values.values
+                            .filter { it.severity != ZoneSeverity.NORMAL }
+                            .sortedByDescending { it.severity.ordinal }
                     }
             } catch (e: Exception) {
                 _message.value = e.message

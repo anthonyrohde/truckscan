@@ -185,7 +185,7 @@ class ElmAdapter(
         }
 
         val candidates = BusInit.candidatesFor(bus, identity)
-        var firstApplied: BusInit.Sequence? = null
+        var lastApplied: BusInit.Sequence? = null
 
         for (sequence in candidates) {
             var applied = true
@@ -204,7 +204,7 @@ class ElmAdapter(
                 log("Bus init '${sequence.label}' not supported by adapter")
                 continue
             }
-            if (firstApplied == null) firstApplied = sequence
+            lastApplied = sequence
 
             currentBus = bus
             extendedAddressing = bus.extendedAddressing
@@ -219,15 +219,22 @@ class ElmAdapter(
             log("Bus init '${sequence.label}' applied but bus is silent")
         }
 
-        val fallback = firstApplied
-            ?: throw AdapterException(
+        if (lastApplied == null) {
+            throw AdapterException(
                 "Could not configure ${bus.displayName}: adapter rejected every " +
                     "known initialisation sequence.",
             )
+        }
 
+        // The adapter is left configured by whichever sequence was applied
+        // last, not the first one that applied cleanly. Reporting the first
+        // would name a configuration the adapter is not in, and a log that
+        // misnames the state it is describing costs more time than no log.
         currentBus = bus
         extendedAddressing = bus.extendedAddressing
-        BusSelection(bus, fallback.label, trafficObserved = false)
+        txHeader = null
+        rxFilter = null
+        BusSelection(bus, lastApplied.label, trafficObserved = false)
     }
 
     /**
