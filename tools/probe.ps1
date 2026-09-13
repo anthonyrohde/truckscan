@@ -27,7 +27,7 @@
 param(
     [switch] $ListPorts,
     [string] $Port,
-    [ValidateSet('alive', 'mscan', 'burst', 'rate')]
+    [ValidateSet('alive', 'monitor', 'mscan', 'burst', 'rate')]
     [string] $Investigation,
     [string] $ScriptFile,
     [int]    $Baud = 115200,
@@ -102,6 +102,17 @@ function Test-Line {
 
     $pci = [Convert]::ToInt32($upper.Substring(0, 2), 16)
     $type = $pci -band 0xF0
+
+    # The same bytes mean two things depending on ATCAF. With ATCAF0 the frame
+    # carries its own ISO-TP header and the service is the second byte; with
+    # ATCAF1 - the state after ATZ - the adapter adds that header and the
+    # service comes first. So '1101' is an innocuous-looking first frame under
+    # one reading and ECU RESET under the other. Check both; either one naming
+    # a refused service refuses the line.
+    if ($RefusedServices.ContainsKey($pci)) {
+        return @{ Kind = 'refused'; Text = $text
+                  Reason = ('read without an ISO-TP header this is service 0x{0:X2}, which {1}' -f $pci, $RefusedServices[$pci]) }
+    }
 
     # 0x30 is flow control: permission for the sender to continue, no service.
     if ($type -eq 0x30) { return @{ Kind = 'frame'; Text = $text; Note = 'flow control' } }
@@ -270,6 +281,37 @@ ATCRA 7E8
 3000000000000000
 '@
     }
+    monitor = @{
+        Title = 'Can this adapter monitor at all'
+        Body  = @'
+# ATMA returns STOPPED on this adapter even while modules are answering,
+# which makes the app report a live bus as silent and stops it ever
+# caching a working bus setup. Two candidate reasons: monitoring needs
+# the protocol brought up by a real request first, and STN chipsets have
+# their own monitor command, STM, which the app never tries.
+#
+# This proves the bus is alive, then tries both. Ignition ON.
+ATZ
+ATE0
+ATH1
+ATSP6
+
+# Prove the bus is alive and bring the protocol up. ATCAF0 first, so the
+# frame below carries its own ISO-TP header - without it the adapter is
+# still auto-formatting after ATZ and rejects a header-prefixed frame
+# with '?', which is exactly what happened the first time this was tried.
+ATCAF0
+ATSH 7DF
+ATCRA 7E8
+0201000000000000
+
+# ELM monitor, now that the protocol has carried a real request.
+ATMA
+
+# STN monitor.
+STM
+'@
+    }
     rate = @{
         Title = 'Can the line rate be raised'
         Body  = @'
@@ -354,7 +396,12 @@ try {
                 continue
             }
             default {
-                $isMonitor = ($line.Text.ToUpper() -replace '\s', '') -like 'ATMA*'
+                # ATMA and the STN equivalent STM both stream until something
+                # interrupts them. Treating STM as an ordinary command would
+                # time out and leave the adapter still streaming into whatever
+                # came next.
+                $cmdUpper = ($line.Text.ToUpper() -replace '\s', '')
+                $isMonitor = ($cmdUpper -like 'ATMA*') -or ($cmdUpper -like 'STM*')
                 $started = Get-Date
                 $serial.Write($line.Text + "`r")
                 $raw = if ($isMonitor) {

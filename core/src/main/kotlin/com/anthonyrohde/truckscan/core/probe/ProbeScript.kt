@@ -136,6 +136,30 @@ object ProbeScript {
     private fun classifyFrame(raw: String, bytes: ByteArray): Line {
         val frame = IsoTpFrame.parse(bytes)
 
+        // The same bytes mean two different things depending on the adapter's
+        // auto-formatting setting, and a validator that only knows one of them
+        // can be walked straight past.
+        //
+        // With ATCAF0 the frame carries its own ISO-TP header, so the service
+        // is the second byte. With ATCAF1 - which is the state after ATZ - the
+        // adapter adds that header itself and the caller sends the service
+        // first. So "1101" is a harmless-looking first frame under one reading
+        // and ECU RESET under the other.
+        //
+        // Checking only the header reading let the reset through. Both readings
+        // are now checked and either one naming a refused service refuses the
+        // line: the cost of being wrong in this direction is a line that has to
+        // be rewritten, and in the other it is somebody's module.
+        bytes.firstOrNull()?.toInt()?.and(0xFF)?.let { asServiceFirst ->
+            REFUSED_SERVICES[asServiceFirst]?.let { why ->
+                return Line.Refused(
+                    raw,
+                    "read without an ISO-TP header this is service " +
+                        "0x${hex(asServiceFirst)}, which $why",
+                )
+            }
+        }
+
         // Flow control carries no service - it is the receiver granting the
         // sender permission to continue, and is exactly what has to be
         // exercised to answer the question about consecutive frames.

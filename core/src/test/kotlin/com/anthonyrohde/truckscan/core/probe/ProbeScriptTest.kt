@@ -128,6 +128,39 @@ class ProbeScriptTest {
         assertTrue(refused.reason.contains("persists"), refused.reason)
     }
 
+    /**
+     * Found by running the harness against the truck: the adapter rejected a
+     * PCI-prefixed frame because ATZ had left auto-formatting on, which is the
+     * mode where the caller sends the service first and the adapter adds the
+     * header. Under that reading "1101" is ECU reset, and the validator - which
+     * only knew the other reading - called it current data and would have sent
+     * it.
+     */
+    @Test
+    fun `a frame that is a refused service without its header is refused`() {
+        // Reads as service 0x11, ECU reset, when the adapter adds the header.
+        val reset = assertInstanceOf(ProbeScript.Line.Refused::class.java, one("1101"))
+        assertTrue(reset.reason.contains("resets the module"), reset.reason)
+
+        // Clear fault codes, same trick.
+        val clear = assertInstanceOf(ProbeScript.Line.Refused::class.java, one("14FFFFFF"))
+        assertTrue(clear.reason.contains("erases"), clear.reason)
+
+        // Security access.
+        assertInstanceOf(ProbeScript.Line.Refused::class.java, one("2701"))
+        // Routine control.
+        assertInstanceOf(ProbeScript.Line.Refused::class.java, one("310101FF"))
+    }
+
+    /** The hardening must not refuse the things that were already fine. */
+    @Test
+    fun `header-carrying frames and flow control still pass`() {
+        assertInstanceOf(ProbeScript.Line.Frame::class.java, one("023E000000000000"))
+        assertInstanceOf(ProbeScript.Line.Frame::class.java, one("0322F19000000000"))
+        assertInstanceOf(ProbeScript.Line.Frame::class.java, one("3000000000000000"))
+        assertInstanceOf(ProbeScript.Line.Frame::class.java, one("0201000000000000"))
+    }
+
     @Test
     fun `malformed input is refused rather than sent`() {
         assertInstanceOf(ProbeScript.Line.Refused::class.java, one("hello world"))
