@@ -90,6 +90,12 @@ fun FaultsScreen(viewModel: ScanViewModel) {
                     Column(Modifier.padding(12.dp)) {
                         DataRow("Modules read", current.results.size.toString())
                         DataRow("Faults found", current.totalFaults.toString())
+                        // A module answers a status-mask read with its whole
+                        // DTC table, most of it monitors that have not run.
+                        // This PCM returns 344 records on a healthy truck, so
+                        // the number that is not a fault has to be named or the
+                        // one that is looks like a rounding error.
+                        DataRow("Monitors not yet run", current.totalNotRun.toString())
                         DataRow(
                             "Unreadable modules",
                             current.unreadableModules.size.toString(),
@@ -100,10 +106,41 @@ fun FaultsScreen(viewModel: ScanViewModel) {
 
             if (current.modulesWithFaults.isEmpty()) {
                 item {
-                    EmptyState(
-                        "No stored faults",
-                        "Every module that answered reported a clean fault memory.",
-                    )
+                    // "Clean" is only true of the modules that were actually
+                    // read. Saying it while some could not be read is how a
+                    // diagnostic tool tells someone their truck is fine when it
+                    // has not looked.
+                    if (current.unreadableModules.isEmpty()) {
+                        EmptyState(
+                            "No stored faults",
+                            "Every module that answered reported a clean fault memory.",
+                        )
+                    } else {
+                        EmptyState(
+                            "No faults in the modules that were read",
+                            "${current.unreadableModules.size} module(s) could not be " +
+                                "read, so this is not a clean bill of health. Their " +
+                                "reasons are listed below.",
+                        )
+                    }
+                }
+            }
+
+            if (current.unreadableModules.isNotEmpty()) {
+                items(current.unreadableModules) { result ->
+                    Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(
+                                "${result.module.module.code} - not read",
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                result.error ?: "No reason recorded",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
 
@@ -115,7 +152,7 @@ fun FaultsScreen(viewModel: ScanViewModel) {
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
                             Text(
-                                "${result.module.module.code} - ${result.dtcs.size} fault(s)",
+                                "${result.module.module.code} - ${result.faults.size} fault(s)",
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Text(
@@ -125,7 +162,7 @@ fun FaultsScreen(viewModel: ScanViewModel) {
                         }
 
                         Spacer(Modifier.height(8.dp))
-                        result.dtcs.forEach { dtc ->
+                        result.faults.forEach { dtc ->
                             Column(Modifier.padding(vertical = 4.dp)) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text(
