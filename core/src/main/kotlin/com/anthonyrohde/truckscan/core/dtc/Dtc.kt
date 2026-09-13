@@ -41,6 +41,20 @@ value class DtcStatus(val raw: Int) {
     /** True when the fault is present right now, not just historically. */
     val isCurrentlyFailing: Boolean get() = testFailed || testFailedThisOperationCycle
 
+    /**
+     * True when this record says something is wrong with the vehicle.
+     *
+     * The two "not completed" bits, 0x10 and 0x40, say only that a monitor has
+     * not run. A module answering a status-mask read returns its whole DTC
+     * table, so on a healthy truck almost every record carries one or both of
+     * them and nothing else - a 2022 F-250 PCM returns 344 such records. Those
+     * are not faults, and counting them as faults puts a frightening number in
+     * front of someone whose truck is fine.
+     */
+    val isNoteworthy: Boolean
+        get() = testFailed || testFailedThisOperationCycle || pending || confirmed ||
+            testFailedSinceLastClear || warningIndicatorRequested
+
     fun describe(): String {
         val parts = buildList {
             if (confirmed) add("confirmed")

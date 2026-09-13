@@ -119,6 +119,18 @@ class UdsNegativeResponseException(
 
     val code: NegativeResponseCode? = NegativeResponseCode.fromCode(nrc)
 
+    /**
+     * True when the module has told us it does not implement this request.
+     *
+     * That is an answer, not a failure: the caller should try an older service
+     * rather than treat the module as unread. Every other negative response
+     * leaves the question unanswered.
+     */
+    val meansServiceIsAbsent: Boolean
+        get() = code == NegativeResponseCode.SERVICE_NOT_SUPPORTED ||
+            code == NegativeResponseCode.SUB_FUNCTION_NOT_SUPPORTED ||
+            code == NegativeResponseCode.REQUEST_OUT_OF_RANGE
+
     companion object {
         private fun buildMessage(service: Int, nrc: Int, moduleName: String?): String {
             val serviceLabel = UdsService.fromSid(service)?.label

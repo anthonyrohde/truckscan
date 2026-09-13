@@ -13,7 +13,22 @@ data class ModuleDtcResult(
     /** Set when the module could not be read, with a human-readable reason. */
     val error: String? = null,
 ) {
-    val hasFaults: Boolean get() = dtcs.isNotEmpty()
+    /**
+     * Entries that describe something wrong, as opposed to something not yet
+     * checked.
+     *
+     * The distinction is the whole report. A 2022 F-250 PCM answers a
+     * status-mask read with 344 records, and on a healthy truck every one of
+     * them carries only "not completed" bits - 0x40, or 0x50 with the
+     * since-last-clear bit as well. Counting records would put "344 faults" on
+     * the screen of a vehicle with none.
+     */
+    val faults: List<Dtc> get() = dtcs.filter { it.status.isNoteworthy }
+
+    /** Monitors the module has simply not run yet. Not a problem, and not news. */
+    val notRunCount: Int get() = dtcs.size - faults.size
+
+    val hasFaults: Boolean get() = faults.isNotEmpty()
     val confirmedCount: Int get() = dtcs.count { it.status.confirmed }
     val pendingCount: Int get() = dtcs.count { it.status.pending && !it.status.confirmed }
 }
@@ -25,7 +40,12 @@ data class VehicleDtcScan(
 ) {
     val allDtcs: List<Dtc> get() = results.flatMap { it.dtcs }
     val modulesWithFaults: List<ModuleDtcResult> get() = results.filter { it.hasFaults }
-    val totalFaults: Int get() = allDtcs.size
+
+    /** Records that say something is wrong. See [ModuleDtcResult.faults]. */
+    val totalFaults: Int get() = results.sumOf { it.faults.size }
+
+    /** Records that only say a monitor has not run. */
+    val totalNotRun: Int get() = results.sumOf { it.notRunCount }
     val unreadableModules: List<ModuleDtcResult> get() = results.filter { it.error != null }
 
     /** Plain-text report, for sharing or attaching to a forum post. */
@@ -35,10 +55,17 @@ data class VehicleDtcScan(
         if (modulesWithFaults.isEmpty()) {
             appendLine("No faults stored in any module that answered.")
         }
+        if (totalNotRun > 0) {
+            appendLine(
+                "$totalNotRun further entries are monitors that have not run " +
+                    "since the last clear. They are not faults.",
+            )
+            appendLine()
+        }
         for (result in modulesWithFaults) {
             appendLine("${result.module.module.code} (${result.module.module.addressLabel}) " +
                 "on ${result.module.bus.displayName}")
-            for (dtc in result.dtcs) {
+            for (dtc in result.faults) {
                 appendLine("  ${dtc.displayCode}  ${dtc.description}")
                 appendLine("      status: ${dtc.status.describe()}")
             }
@@ -77,14 +104,29 @@ class DtcScanner(
         }
         val client = clientFor(module)
 
+        // Set when service 0x19 failed for a reason that is NOT "this module
+        // does not do UDS". A transport failure and a module with nothing wrong
+        // must never look the same, and they used to: a 0x19 read that broke
+        // fell through to mode 03, mode 03 answered "43 00" meaning no
+        // emissions codes, and the module was reported clean. On this truck the
+        // PCM answers 0x19 with 344 records over 197 frames, so the read that
+        // breaks is exactly the one carrying all the information.
+        var readFailure: String? = null
+
         // Preferred path: UDS, which gives us status bytes and failure types.
         try {
             val body = client.readDtcsByStatusMask(STATUS_MASK_ALL)
             return ModuleDtcResult(module, Dtc.parseDtcListResponse(body))
         } catch (e: UdsNegativeResponseException) {
             logger?.invoke("${module.module.code}: service 0x19 rejected (${e.message})")
+            // The module answered, and said no. That is information, not a
+            // failure - it means try the legacy service instead.
+            if (!e.meansServiceIsAbsent) {
+                readFailure = "service 0x19 rejected: ${e.message}"
+            }
         } catch (e: Exception) {
             logger?.invoke("${module.module.code}: service 0x19 failed (${e.message})")
+            readFailure = "service 0x19 did not complete: ${e.message ?: e::class.simpleName}"
         }
 
         // Fallback: legacy mode 03, two-byte codes and no status detail.
@@ -98,10 +140,17 @@ class DtcScanner(
             if (body.isEmpty() || body[0] != 0x43.toByte()) {
                 ModuleDtcResult(module, emptyList(), "Module did not answer mode 03 either")
             } else {
-                ModuleDtcResult(module, Dtc.parseMode03Response(body.copyOfRange(1, body.size)))
+                val dtcs = Dtc.parseMode03Response(body.copyOfRange(1, body.size))
+                // Mode 03 carries emissions codes only. An empty result here
+                // does not clear a module whose full report could not be read.
+                ModuleDtcResult(
+                    module,
+                    dtcs,
+                    error = if (dtcs.isEmpty()) readFailure else null,
+                )
             }
         } catch (e: Exception) {
-            ModuleDtcResult(module, emptyList(), e.message ?: "Unreadable")
+            ModuleDtcResult(module, emptyList(), readFailure ?: e.message ?: "Unreadable")
         }
     }
 
