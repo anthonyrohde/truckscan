@@ -118,7 +118,14 @@ class IsoTpChannel(
         return reassemble(frames, timeoutMillis)
     }
 
-    /** Fire-and-forget, for TesterPresent with the suppress-response bit set. */
+    /**
+     * Fire-and-forget, for TesterPresent with the suppress-response bit set.
+     *
+     * `ATR0` is right here and nowhere else: the request explicitly asks the
+     * module not to answer, so there is no reply to lose and nothing is
+     * collected from the read. Everywhere else it was found to hide frames
+     * rather than save time.
+     */
     suspend fun send(txId: Int, payload: ByteArray) {
         adapter.setTxHeader(txId)
         val frames = IsoTpSegmenter.segment(payload)
@@ -180,26 +187,33 @@ class IsoTpChannel(
         // that answer, and are carried to the reassembler rather than dropped.
         val early = mutableListOf<CanFrame>()
 
-        adapter.setResponsesEnabled(false)
-        try {
-            consecutive.dropLast(1).forEachIndexed { index, frame ->
-                early += adapter.sendFrameNoWait(frame.encode(padTo, config.padByte))
-                if (gapMicros > 0) delay((gapMicros / 1000L).coerceAtLeast(1))
-                // Honour the receiver's block size: after every `blockSize`
-                // frames it expects to send us another flow control frame.
-                if (blockSize > 0 && (index + 1) % blockSize == 0 &&
-                    index != consecutive.size - 2
-                ) {
-                    adapter.setResponsesEnabled(true)
-                    val next = awaitFlowControlOnly()
-                    if (next.flowStatus == IsoTpFrame.FlowStatus.OVERFLOW) {
-                        throw IsoTpException("Module reported overflow mid-transfer")
-                    }
-                    adapter.setResponsesEnabled(false)
+        // No ATR0 here, and that is a change made on evidence from the other
+        // direction. Suppressing responses was measured to make the adapter
+        // return a bare prompt with no frames at all, which would make the
+        // `early` collection below permanently empty and could swallow a
+        // block-size flow control the module sends mid-transfer. The cost of
+        // not suppressing is roughly 30 ms per frame on a request long enough
+        // to need segmenting, which is rare and worth paying.
+        //
+        // UNTESTED ON HARDWARE. Nothing this app does routinely sends a request
+        // longer than seven bytes, and the read-only probe console cannot test
+        // it: a first frame begins 0x10, which is also the byte for
+        // DiagnosticSessionControl, so the allowlist refuses to put it on a bus.
+        // That refusal is correct and stays. This path is reasoned, not measured,
+        // and is marked as such rather than described as if it were proven.
+        consecutive.dropLast(1).forEachIndexed { index, frame ->
+            early += adapter.sendFrameNoWait(frame.encode(padTo, config.padByte))
+            if (gapMicros > 0) delay((gapMicros / 1000L).coerceAtLeast(1))
+            // Honour the receiver's block size: after every `blockSize`
+            // frames it expects to send us another flow control frame.
+            if (blockSize > 0 && (index + 1) % blockSize == 0 &&
+                index != consecutive.size - 2
+            ) {
+                val next = awaitFlowControlOnly()
+                if (next.flowStatus == IsoTpFrame.FlowStatus.OVERFLOW) {
+                    throw IsoTpException("Module reported overflow mid-transfer")
                 }
             }
-        } finally {
-            adapter.setResponsesEnabled(true)
         }
 
         val (last, status) = adapter.sendFrameAndCollect(

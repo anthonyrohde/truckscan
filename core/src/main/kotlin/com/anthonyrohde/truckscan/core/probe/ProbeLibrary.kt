@@ -329,6 +329,133 @@ object ProbeLibrary {
         ),
 
         Investigation(
+            name = "The paths the primitives run did not cover",
+            question =
+            "The primitives run settled the request and response path. It did not touch four things the app depends on: which addresses actually answer on the powertrain bus now that MS-CAN is known to be empty, ReadDTCInformation on its own, the As-Built read path - which has never been run against this truck at all - and the entire 29-bit code path. This covers those. It cannot cover the multi-frame request path: a first frame begins 0x10, which is also DiagnosticSessionControl, so the read-only rule refuses to put one on a bus. That refusal is correct and stays, and that path is marked in the source as reasoned rather than measured.",
+            script = """
+                # The paths the app uses that the primitives run did not cover. Everything
+                # here is a read. Ignition ON, engine running if you can - section A is the
+                # liveness check and the rest is void without it.
+
+                # ============================================================ A. is it awake
+                ATZ
+                ATE0
+                ATL0
+                ATS0
+                ATH1
+                ATAL
+                ATCAF0
+                ATCFC0
+                ATAT1
+                STP 33
+                ATSH 7E0
+                ATCRA 7E8
+                0201000000000000
+
+                # ============================================ B. who is actually on this bus
+                # MS-CAN is empty on this truck, so every module it has must answer here,
+                # through the gateway. This is module discovery, by hand, with the receive
+                # filter cleared so any address can reply - watch the CAN ID on each reply,
+                # not just the fact of one. A module that refuses with 7F is still a module.
+                #
+                # This also matters because a full sweep in the app once found nothing and
+                # that has never been explained.
+                ATCRA
+                ATSH 7E0
+                023E000000000000    # PCM
+                ATSH 7E1
+                023E000000000000    # TCM
+                ATSH 7E2
+                023E000000000000    # engine 3
+                ATSH 760
+                023E000000000000    # ABS
+                ATSH 706
+                023E000000000000    # RCM
+                ATSH 726
+                023E000000000000    # BCM
+                ATSH 720
+                023E000000000000    # IPC
+                ATSH 724
+                023E000000000000    # SCCM
+                ATSH 712
+                023E000000000000    # DSM
+                ATSH 733
+                023E000000000000    # HVAC
+                ATSH 736
+                023E000000000000    # PAM
+                ATSH 7D0
+                023E000000000000    # APIM
+                ATSH 727
+                023E000000000000    # ACM
+                ATSH 740
+                023E000000000000    # FCIM
+                ATSH 754
+                023E000000000000    # TCU
+                ATSH 730
+                023E000000000000    # GWM
+                ATSH 764
+                023E000000000000    # PSCM
+                ATSH 765
+                023E000000000000    # IPMA
+                ATSH 775
+                023E000000000000    # TRM
+                ATSH 783
+                023E000000000000    # RTM
+
+                # ==================================================== C. fault codes, isolated
+                # UDS ReadDTCInformation, subfunction 02, mask FF: every stored DTC. The app
+                # does this and it worked, but it has never been run on its own.
+                ATSH 7E0
+                ATCRA 7E8
+                031902FF00000000
+                3000000000000000
+
+                # ================================================= D. the As-Built read path
+                # Ford keeps configuration in DIDs from DE00 up, read with service 22. The
+                # As-Built reader has never been run against this truck at all, so this asks
+                # for the first few blocks and nothing more. Reading is all it does.
+                0322DE0000000000
+                3000000000000000
+                0322DE0100000000
+                3000000000000000
+                0322DE0200000000
+                3000000000000000
+
+                # A longer one, to exercise a reply spanning several flow controls.
+                0322F19000000000
+                3000000000000000
+
+                # ======================================== E. functional addressing, 11-bit
+                # 7DF is the broadcast address the live-data poller uses. Several modules may
+                # answer one request; with the filter cleared you should see more than 7E8 if
+                # anything else speaks OBD-II.
+                ATCRA
+                ATSH 7DF
+                0201000000000000
+                02010C0000000000
+                0201050000000000
+
+                # ============================================== F. 29-bit addressing, untried
+                # Nothing on this truck has needed it, and the app has a whole code path for
+                # it that has never touched hardware. 18DB33F1 is the standard 29-bit
+                # functional request; a reply would come from 18DAF1xx.
+                ATZ
+                ATE0
+                ATH1
+                ATCAF0
+                ATCFC0
+                STP 34
+                STPRS
+                ATCRA
+                ATSH 18DB33F1
+                0201000000000000
+
+                # ========================================================== G. leave it clean
+                ATZ
+            """.trimIndent(),
+        ),
+
+        Investigation(
             name = "Does MS-CAN answer on protocol 53",
             question =
             "The adapter's own protocol table, read back with STP xx and STPRS, "  +
