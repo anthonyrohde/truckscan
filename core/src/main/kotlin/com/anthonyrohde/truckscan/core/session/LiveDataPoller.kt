@@ -185,6 +185,51 @@ class LiveDataPoller(
     }
 
     /**
+     * Continuously samples [fast] on every tick and rotates through [slow] a
+     * few at a time, so a needle gauge is never held hostage by everything
+     * else someone also wants to watch.
+     *
+     * [stream] gives every parameter equal standing, and that is the right
+     * default when nothing distinguishes them. It is the wrong one for a dash:
+     * RPM and speed have to feel live, and on a real vehicle they were seen
+     * sharing a sweep with twenty-odd others, arriving once every few seconds
+     * because the sweep is only as fast as the slowest thing in it. Splitting
+     * the list fixes that without asking for less data - [slow] still all gets
+     * read, just spread across several ticks instead of one, and
+     * [LiveValueHold] already holds a parameter's last reading between its own
+     * updates, which is exactly the behaviour a temperature or a pressure that
+     * moves slowly needs.
+     *
+     * @param slowPerTick how many of [slow] to include each tick, rotating
+     *   through the list. Larger catches up faster after connecting, at the
+     *   cost of slowing down [fast] a little on every tick, not just some.
+     */
+    fun streamPrioritized(
+        fast: List<Pid>,
+        slow: List<Pid>,
+        intervalMillis: Long = 250,
+        slowPerTick: Int = 1,
+    ): Flow<LiveDataSample> = flow {
+        require(fast.isNotEmpty() || slow.isNotEmpty()) { "Select at least one parameter to stream" }
+        var slowCursor = 0
+        while (true) {
+            val startedAt = System.currentTimeMillis()
+            val chunk = if (slow.isEmpty()) {
+                emptyList()
+            } else {
+                val n = slowPerTick.coerceIn(1, slow.size)
+                List(n) { slow[(slowCursor + it) % slow.size] }
+            }
+            if (slow.isNotEmpty()) slowCursor = (slowCursor + chunk.size) % slow.size
+
+            emit(sampleOnce(fast + chunk))
+            val elapsed = System.currentTimeMillis() - startedAt
+            val remaining = intervalMillis - elapsed
+            if (remaining > 0) delay(remaining)
+        }
+    }
+
+    /**
      * Requests a single mode 01 parameter.
      *
      * Strips the echoed mode and PID bytes so the caller gets just the value

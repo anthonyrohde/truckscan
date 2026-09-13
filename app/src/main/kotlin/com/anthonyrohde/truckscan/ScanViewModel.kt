@@ -384,6 +384,13 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         _selectedPids.value = keys.toSet()
     }
 
+    /**
+     * RPM, speed and boost's two inputs (manifold and barometric pressure) -
+     * the readings a dash cluster cannot show as "live" if they are stuck
+     * waiting behind everything else in a shared sweep. See [startLiveData].
+     */
+    private val PRIORITY_LIVE_KEYS = setOf("rpm", "speed", "map_ext", "baro")
+
     fun startLiveData() {
         val active = engine ?: return
         val pids = _availablePids.value.filter { it.key in _selectedPids.value }
@@ -397,9 +404,17 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         streamingPids = pids
         hold = LiveValueHold()
         _staleKeys.value = emptySet()
+        // RPM, speed and boost's two inputs, whenever they are among what is
+        // selected, get a fresh reading every tick rather than taking their
+        // turn with everything else. Measured on the truck: a plain sweep of
+        // twenty-nine parameters landed the tachometer and speedometer once
+        // every few seconds, because the sweep is only as fast as its slowest
+        // member - and those three are the ones a dash cannot read as "live"
+        // at that rate.
+        val (fast, slow) = pids.partition { it.key in PRIORITY_LIVE_KEYS }
         liveDataJob = viewModelScope.launch {
             try {
-                active.liveData.stream(pids, intervalMillis = 200)
+                active.liveData.streamPrioritized(fast, slow, intervalMillis = 200)
                     .collect { sample ->
                         // Recording gets the raw sweep and the screen gets the
                         // held one. A log is a record of what was measured, so
