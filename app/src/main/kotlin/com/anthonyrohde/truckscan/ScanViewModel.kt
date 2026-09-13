@@ -82,6 +82,17 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     private val _liveSample = MutableStateFlow<LiveDataSample?>(null)
     val liveSample: StateFlow<LiveDataSample?> = _liveSample.asStateFlow()
 
+    /**
+     * Whether a sweep is running, as state the UI can actually observe.
+     *
+     * The screen used to infer this from "a sample exists", and stopLiveData
+     * left the last sample in place, so Stop changed nothing on screen and both
+     * buttons looked dead. isStreaming is a plain property, so composition is
+     * never told when it changes and could not be used either.
+     */
+    private val _streaming = MutableStateFlow(false)
+    val streaming: StateFlow<Boolean> = _streaming.asStateFlow()
+
     private val _availablePids = MutableStateFlow<List<Pid>>(PidCatalog.ALL)
     val availablePids: StateFlow<List<Pid>> = _availablePids.asStateFlow()
 
@@ -382,6 +393,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         stopLiveData()
+        _streaming.value = true
         streamingPids = pids
         hold = LiveValueHold()
         _staleKeys.value = emptySet()
@@ -452,6 +464,11 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     fun stopLiveData() {
         liveDataJob?.cancel()
         liveDataJob = null
+        _streaming.value = false
+        // The gauges are showing readings that are no longer being refreshed.
+        // Leaving them there is a display claiming to be live when it is not,
+        // which is the same failure as a stale warning below.
+        _liveSample.value = null
         // Polling has stopped, so nothing more can be recorded. The data
         // already captured stays put until a new recording replaces it.
         _isRecording.value = false
@@ -542,12 +559,19 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
+        // result.faults, not result.dtcs. A module answers a status-mask read
+        // with its whole DTC table, and listing all of it put this truck's three
+        // real faults - two confirmed at the body module and a confirmed
+        // low-voltage code at the SYNC module - under 439 lines of "not tested
+        // this cycle", in the one file meant to be read by someone hunting a
+        // problem.
         val faultLines = scan?.results.orEmpty().flatMap { result ->
-            result.dtcs.map { dtc ->
+            result.faults.map { dtc ->
                 "${result.module.module.code}  ${dtc.displayCode}  ${dtc.description} " +
                     "[${dtc.status.describe()}]"
             }
         }
+        val monitorsNotRun = scan?.results.orEmpty().sumOf { it.notRunCount }
 
         return DiagnosticReport(
             generatedAtMillis = System.currentTimeMillis(),
@@ -567,6 +591,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             modules = modules,
             moduleScan = lastModuleScan,
             faults = faultLines,
+            monitorsNotRun = monitorsNotRun,
             supportedPidCount = supportedPidCount,
             parametersOffered = _availablePids.value.size,
             parametersWatched = streamingPids.size.takeIf { it > 0 }

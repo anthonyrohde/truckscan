@@ -36,7 +36,18 @@ data class DiagnosticReport(
      * and those call for opposite next steps. Never infer one from the other.
      */
     val moduleScan: ModuleScan?,
+    /** Records that say something is wrong. See [ModuleDtcResult.faults]. */
     val faults: List<String>,
+    /**
+     * Records that only say a monitor has not run yet, counted rather than
+     * listed.
+     *
+     * A status-mask read returns a module's whole DTC table. This truck's PCM
+     * returns 344 records of which three are faults, and printing all of them
+     * put those three under 439 lines of "not tested this cycle" in a report
+     * whose entire purpose is to be read by someone looking for a problem.
+     */
+    val monitorsNotRun: Int = 0,
     val supportedPidCount: Int?,
     val parametersOffered: Int,
     /** What the live stream is actually polling. */
@@ -142,6 +153,13 @@ data class DiagnosticReport(
             appendLine("  None recorded, or no scan has been run.")
         } else {
             faults.forEach { appendLine("  $it") }
+        }
+        if (monitorsNotRun > 0) {
+            appendLine()
+            appendLine(
+                "  $monitorsNotRun further record(s) say only that a monitor has not run " +
+                    "since the last clear. They are not faults and are not listed.",
+            )
         }
 
         heading("LIVE DATA")

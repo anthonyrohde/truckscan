@@ -86,7 +86,10 @@ fun LiveDataScreen(viewModel: ScanViewModel) {
             }
         }
     }
-    val streaming = sample != null
+    // Observed state, not inferred from "a sample exists". Stop left the last
+    // sample on screen, so nothing changed when it was pressed and both buttons
+    // looked dead.
+    val streaming by viewModel.streaming.collectAsStateWithLifecycle()
 
     KeepScreenOn(enabled = streaming)
 
@@ -123,8 +126,14 @@ fun LiveDataScreen(viewModel: ScanViewModel) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Button(onClick = { viewModel.startLiveData() }) { Text("Start") }
-                OutlinedButton(onClick = { viewModel.stopLiveData() }) { Text("Stop") }
+                Button(
+                    onClick = { viewModel.startLiveData() },
+                    enabled = !streaming,
+                ) { Text("Start") }
+                OutlinedButton(
+                    onClick = { viewModel.stopLiveData() },
+                    enabled = streaming,
+                ) { Text("Stop") }
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { showPicker = true }) {
                     Text("Choose (${watched.size})")

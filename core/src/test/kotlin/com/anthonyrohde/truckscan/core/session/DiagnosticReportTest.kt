@@ -79,6 +79,7 @@ class DiagnosticReportTest {
         health: List<ParameterHealth> = emptyList(),
         timing: LiveHealth.SweepTiming = LiveHealth.SweepTiming(0, 0, 0, 0, 0),
         faults: List<String> = emptyList(),
+        monitorsNotRun: Int = 0,
     ) = DiagnosticReport(
         generatedAtMillis = 1_757_000_000_000,
         appVersion = "1.0.0 (build 2)",
@@ -92,6 +93,7 @@ class DiagnosticReportTest {
         modules = modules,
         moduleScan = moduleScan,
         faults = faults,
+        monitorsNotRun = monitorsNotRun,
         supportedPidCount = 67,
         parametersOffered = 45,
         parametersWatched = 5,
@@ -228,6 +230,39 @@ class DiagnosticReportTest {
         )
         assertTrue(text.contains("quick scan at"), text)
     }
+    /**
+     * The report exists to be read by someone hunting a problem.
+     *
+     * A real one from a 2022 F-250 listed three confirmed faults - two at the
+     * body module and a low-voltage code at the SYNC module - under 439 lines
+     * of "not tested this cycle", because a status-mask read returns a module's
+     * whole DTC table and all of it was being printed. The three that mattered
+     * were invisible.
+     */
+    @Test
+    fun `monitors that have not run are counted, not listed`() {
+        val text = report(
+            faults = listOf(
+                "BCM  B156B:15  circuit short to battery or open [confirmed]",
+                "APIM  U3003:16  Battery voltage out of range [confirmed]",
+            ),
+            monitorsNotRun = 341,
+        )
+
+        assertTrue(text.contains("B156B:15"), text)
+        assertTrue(text.contains("U3003:16"), text)
+        assertTrue(text.contains("341 further record(s)"), text)
+        assertTrue(text.contains("They are not faults"), text)
+        // The three real ones must be findable without scrolling past hundreds.
+        assertTrue(
+            text.lines().count { it.trim().startsWith("BCM") || it.trim().startsWith("APIM") } == 2,
+            "only the faults themselves should be listed",
+        )
+    }
+
+    @Test
+    fun `a clean module says nothing about monitors it did not have to count`() {
+        assertFalse(report().contains("further record"))
 }
 
 class DiagnosticReportSelectionTest {
@@ -264,4 +299,6 @@ class DiagnosticReportSelectionTest {
         assertTrue(text.contains("Parameters streaming"), text)
         assertTrue(text.contains("not a failure"), text)
     }
+
+}
 }

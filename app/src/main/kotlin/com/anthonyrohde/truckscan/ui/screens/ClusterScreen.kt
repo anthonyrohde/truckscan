@@ -72,6 +72,7 @@ private val Reading = Color(0xFFF2F5FA)
 @Composable
 fun ClusterScreen(viewModel: ScanViewModel) {
     val sample by viewModel.liveSample.collectAsStateWithLifecycle()
+    val streaming by viewModel.streaming.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     // A dash display that sleeps is not a dash display.
@@ -142,10 +143,7 @@ fun ClusterScreen(viewModel: ScanViewModel) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Driven by the sample rather than viewModel.isStreaming: the
-                // latter is a plain property, so composition would never be
-                // told it changed and the button would stay wrong.
-                if (sample != null) {
+                if (streaming) {
                     Button(onClick = { viewModel.stopLiveData() }) { Text("Stop") }
                 } else {
                     Button(onClick = { viewModel.startCluster() }) { Text("Start cluster") }
