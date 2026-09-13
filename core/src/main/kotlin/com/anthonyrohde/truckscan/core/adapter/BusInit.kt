@@ -22,9 +22,9 @@ package com.anthonyrohde.truckscan.core.adapter
  * sets a CAN controller's bitrate and options, and says nothing about which
  * pins the transceiver is attached to.
  *
- * The fix is to take the protocol number from [CanBus.stnProtocolNumber] and
- * send nothing else. The bitrate is part of the protocol; a separate `STPBR`
- * is the exact mistake above waiting to happen again.
+ * The fix is to take the protocol number from [CanBus.stnProtocolNumber]. The
+ * `STPBR` that follows now only ever restates the rate the protocol already
+ * implies, so it cannot contradict it again.
  */
 object BusInit {
 
@@ -53,7 +53,14 @@ object BusInit {
         val protocol = bus.stnProtocolNumber ?: return null
         return Sequence(
             label = "STN protocol %02X".format(protocol),
-            commands = listOf("STP %02X".format(protocol)),
+            // STPBR is kept, and now only ever restates the rate the protocol
+            // already implies. It is here because the one configuration proven
+            // to work on the truck is STP followed by STPBR, and STP alone has
+            // never been shown to open a protocol - a probe that sent STP 33
+            // by itself got NO DATA from a PCM that answered ATSP6 a minute
+            // later. Which of the two actually opens it is being measured; until
+            // then, do not drop a command from a sequence known to work.
+            commands = listOf("STP %02X".format(protocol), "STPBR ${'$'}{bus.bitrateBps}", "STPBRR"),
         )
     }
 

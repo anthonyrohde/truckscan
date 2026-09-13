@@ -149,7 +149,11 @@ class ElmAdapter(
 
         val ati = rawCommand("ATI").lines.lastOrNull { it.isNotBlank() } ?: elmId
         val sti = rawCommand("STI").let { if (it.isSuccess) it.text.trim() else "" }
-        val desc = rawCommand("@1").let { if (it.isSuccess) it.text.trim() else "" }
+        // STDI, not @1. An OBDLink EX r2.2.1 answers "?" to @1 and names itself
+        // to STDI; the app showed "Unknown adapter" for want of asking the
+        // command the hardware implements.
+        val desc = rawCommand("STDI").let { if (it.isSuccess) it.text.trim() else "" }
+            .ifBlank { rawCommand("@1").let { if (it.isSuccess) it.text.trim() else "" } }
 
         identity = AdapterIdentity(
             elmIdentifier = ati,
@@ -214,7 +218,11 @@ class ElmAdapter(
             var applied = true
             for (cmd in sequence.commands) {
                 val r = rawCommand(cmd)
-                if (r.status == AdapterResponse.Status.UNKNOWN_COMMAND) {
+                // STPBRR is a "confirm new bitrate" command that some firmware
+                // omits; never fail a sequence just because it is missing.
+                if (r.status == AdapterResponse.Status.UNKNOWN_COMMAND &&
+                    !cmd.startsWith("STPBRR")
+                ) {
                     applied = false
                     break
                 }

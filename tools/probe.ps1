@@ -21,6 +21,7 @@
   .\probe.ps1 -ListPorts
   .\probe.ps1 -Port COM3 -Investigation alive
   .\probe.ps1 -Port COM3 -Investigation protocols
+  .\probe.ps1 -Port COM3 -Investigation primitives
   .\probe.ps1 -Port COM3 -ScriptFile my-script.txt
 #>
 
@@ -28,7 +29,7 @@
 param(
     [switch] $ListPorts,
     [string] $Port,
-    [ValidateSet('alive', 'monitor', 'protocols', 'mscan', 'burst', 'rate')]
+    [ValidateSet('alive', 'monitor', 'protocols', 'primitives', 'mscan', 'burst', 'rate')]
     [string] $Investigation,
     [string] $ScriptFile,
     [int]    $Baud = 115200,
@@ -476,6 +477,236 @@ STPRS
 STP 06
 '@
     }
+    primitives = @{
+        Title = 'Every protocol primitive, one at a time'
+        Body  = @'
+# Every adapter command this app relies on, one at a time, each with an
+# outcome you can read. The app sends all of it on every connection and the
+# only evidence has ever been "the app worked".
+#
+# READ SECTION A FIRST. If the truck is asleep the whole run is void, which is
+# exactly what happened to the last MS-CAN run.
+#
+# Ignition ON. Engine running is better still - ATRV will say which.
+
+# ============================================================ A. is it awake
+# ATRV is the adapter's own voltmeter and needs no bus at all.
+#   ~12.2-12.7  key off, battery only
+#   ~13.8-14.6  engine running, alternator charging
+ATZ
+ATE0
+ATRV
+
+# What the adapter is. ATI is the ELM327 compatibility string and says
+# ELM327 v1.4b even on an STN chip; STI and STDI are the real ones. @1 is
+# here to record that this adapter answers ? to it - the app used to ask @1
+# for its name and got nothing.
+ATI
+STI
+STDI
+@1
+STSN
+STBR
+ATPPS
+
+# ================================== B. which command actually opens a bus
+# THE FIRST EXPERIMENT, and it may invalidate the MS-CAN result.
+#
+# The burst probe used ATSP6 and the PCM answered. A minute earlier the
+# MS-CAN probe used STP 33 with nothing after it and the same PCM returned
+# NO DATA. The app has always sent STP followed by STPBR, and the app works.
+# So STP on its own may set a protocol without opening it, and every MS-CAN
+# attempt may have been made on a protocol that was never brought up.
+#
+# Four independent attempts at the same request, each from a clean reset.
+# The one that answers 7E8 ... 41 00 ... is the one that opens a bus.
+
+# --- B1: ATSP6, the plain ELM327 way
+ATZ
+ATE0
+ATH1
+ATCAF0
+ATCFC0
+ATSP6
+ATSH 7E0
+ATCRA 7E8
+0201000000000000
+
+# --- B2: STP 33 alone
+ATZ
+ATE0
+ATH1
+ATCAF0
+ATCFC0
+STP 33
+ATSH 7E0
+ATCRA 7E8
+0201000000000000
+
+# --- B3: STP 33 then STPO, which is documented as "open current protocol"
+ATZ
+ATE0
+ATH1
+ATCAF0
+ATCFC0
+STP 33
+STPO
+ATSH 7E0
+ATCRA 7E8
+0201000000000000
+
+# --- B4: STP 33 then STPBR, which is what the app sends and what works
+ATZ
+ATE0
+ATH1
+ATCAF0
+ATCFC0
+STP 33
+STPBR 500000
+STPBRR
+ATSH 7E0
+ATCRA 7E8
+0201000000000000
+
+# ============================== C. MS-CAN again, opened the same two ways
+# If B3 or B4 answered and B2 did not, then the MS-CAN run proved nothing,
+# because it was STP 53 with nothing after it. This repeats it properly.
+# CAN ERROR means nothing acknowledged; NO DATA means the right pins and
+# nobody at that address. One NO DATA here is the headline.
+
+ATZ
+ATE0
+ATH1
+ATCAF0
+ATCFC0
+STP 53
+STPO
+STPRS
+ATSH 726
+023E000000000000
+ATSH 720
+023E000000000000
+ATSH 7D0
+023E000000000000
+
+ATZ
+ATE0
+ATH1
+ATCAF0
+ATCFC0
+STP 53
+STPBR 125000
+STPBRR
+STPRS
+ATSH 726
+023E000000000000
+ATSH 720
+023E000000000000
+ATSH 733
+023E000000000000
+ATSH 7D0
+023E000000000000
+
+# ================================================== D. the working baseline
+# Exactly what the app sets up, then the request that must answer. Everything
+# below this line depends on this line replying.
+ATZ
+ATE0
+ATL0
+ATS0
+ATH1
+ATAL
+ATCAF0
+ATCFC0
+ATAT1
+ATSP6
+ATDPN
+ATSH 7E0
+ATCRA 7E8
+0201000000000000
+
+# ============================================ E. does ATCAF1 change meaning
+# The app runs with auto-formatting OFF and writes its own PCI byte. With it
+# ON the adapter writes the PCI and the caller sends the service directly, so
+# the same hex means two different things. That ambiguity nearly let an ECU
+# reset through the read-only checker.
+#
+# 0103 is the demonstration because it is a read under BOTH readings: mode 01
+# PID 03 with formatting on, stored fault codes with it off. A line that is
+# only safe under one reading is exactly what must never be sent.
+ATCAF1
+0103
+ATCAF0
+0103000000000000
+
+# ================================================= F. does the filter matter
+# ATCRA sets which CAN IDs are let through. Cleared, the reply should still
+# arrive, possibly with other traffic alongside. Set, only 7E8.
+ATCRA
+0201000000000000
+ATCRA 7E8
+0201000000000000
+
+# ================================================== G. does ATST do anything
+# ATST sets the wait before giving up, in 4 ms units. The bracketed timing on
+# each line is the measurement. PID 4E is not a real PID, so both are misses
+# on purpose: a tiny timeout should fail fast, a large one slowly.
+ATST 05
+02014E0000000000
+ATST FF
+02014E0000000000
+ATST 32
+
+# =============================================== H. what the PCM actually has
+# The supported-PID bitmaps: 4 bytes of flags for the next 32 PIDs each, the
+# last bit saying whether the following bitmap exists. This is the definitive
+# list of what this truck can put on a gauge, replacing a catalogue of 45
+# that was never checked against the vehicle.
+0201000000000000
+0201200000000000
+0201400000000000
+0201600000000000
+0201800000000000
+0201A00000000000
+0201C00000000000
+0201E00000000000
+
+# ======================================== I. multi-frame, the correct way
+# Mode 09 PID 02 is the VIN: 17 bytes, too long for one frame. Expect a first
+# frame (7E8 10 ...), silence until flow control, then 7E8 21 ..., 7E8 22 ...
+ATCRA 7E8
+0209020000000000
+3000000000000000
+
+# ================================ J. multi-frame, with a command in between
+# THE SECOND EXPERIMENT. The live-data and As-Built fixes rest on a claim
+# that has never been demonstrated: that any command sent between the first
+# frame and the flow control makes the firmware service the command instead
+# of the bus, losing the consecutive frames. Same request as I, with one
+# harmless command inserted.
+#
+# I produced the VIN and this does not -> the claim is demonstrated.
+# Both work -> the fix is harmless but my stated reason for it is wrong,
+# and I would rather know that than keep repeating it.
+0209020000000000
+ATCRA 7E8
+3000000000000000
+
+# ============================================ K. the long read, the app's way
+# ReadDataByIdentifier F188 is a part number over several frames - the path
+# the As-Built reader uses. ATR0 stops the adapter waiting for a reply to the
+# flow control it has just been told not to expect.
+ATSH 7E0
+ATCRA 7E8
+0322F18800000000
+ATR0
+3000000000000000
+ATR1
+
+# ========================================================== L. leave it clean
+ATZ
+'@
+    }
     mscan = @{
         Title = 'Does MS-CAN answer on protocol 53'
         Body  = @'
@@ -634,7 +865,7 @@ elseif ($Investigation) {
     $title = $Investigations[$Investigation].Title
 }
 else {
-    throw "Give -Investigation (alive, monitor, protocols, mscan, burst, rate) or -ScriptFile."
+    throw "Give -Investigation (alive, monitor, protocols, primitives, mscan, burst, rate) or -ScriptFile."
 }
 
 $parsed = @($scriptText -split "`n" | ForEach-Object { Test-Line $_ })
