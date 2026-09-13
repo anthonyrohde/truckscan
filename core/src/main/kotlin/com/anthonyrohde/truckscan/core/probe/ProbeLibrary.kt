@@ -96,92 +96,85 @@ object ProbeLibrary {
         ),
 
         Investigation(
-            name = "Which MS-CAN init works (all six failed)",
+            name = "Does MS-CAN answer on protocol 53",
             question =
-            "Ran on a 2022 F-250 and every candidate returned CAN ERROR: the " +
-                "adapter's own STP 33 with STPBR 125000 - STPBRR read back 125000, " +
-                "so the bitrate took - and ELM327 protocol B with options C0, 40, " +
-                "01, 11 and 80, each tried against 726, 720 and 7D0. CAN ERROR " +
-                "means no node acknowledged, which is either nothing on those pins " +
-                "or the adapter never reached those pins. Both of those commands " +
-                "only configure a CAN controller, so the second reading is live; " +
-                "run \"Which protocols this adapter has\" first. Kept so the " +
-                "negative result can be reproduced. Ignition ON.",
+            "The adapter's own protocol table, read back with STP xx and STPRS, "  +
+                "names protocol 53 \"MS CAN (ISO 15765, 125K/11B)\" - pins 3/11 at "  +
+                "the right rate, in one command. Every earlier attempt sent STP 33 "  +
+                "with STPBR 125000, and protocol 33 is \"HS CAN (ISO 15765, "  +
+                "500K/11B)\": the high speed transceiver on pins 6/14, told to run "  +
+                "at 125 kbps. That cannot acknowledge anything, which is why every "  +
+                "attempt returned CAN ERROR and never NO DATA. This is the corrected "  +
+                "test, ending on the powertrain bus so a dead adapter cannot be "  +
+                "mistaken for a dead bus. Ignition ON.",
             script = """
-                # ANSWERED, and the answer was no. On a 2022 F-250 every candidate
-                # below returned CAN ERROR - the adapter's own STP 33 with STPBR
-                # 125000 (STPBRR read back 125000, so the bitrate took) and all five
-                # ELM327 protocol B options bytes, against 726, 720 and 7D0.
+                # ANSWERED. The adapter's protocol table, read back with STP xx / STPRS,
+                # names protocol 53 "MS CAN (ISO 15765, 125K/11B)" - pins 3/11, the right
+                # rate, in one command.
                 #
-                #   a reply (7xx ... 7E ...) -> this candidate works
-                #   NO DATA                  -> configured correctly, nobody home
-                #   CAN ERROR                -> no node acknowledged
+                # What this project used to send was STP 33 with STPBR 125000. Protocol 33
+                # is "HS CAN (ISO 15765, 500K/11B)". So it selected the HIGH SPEED
+                # transceiver on pins 6/14 and set it to 125 kbps: a 125 kbps node on a
+                # 500 kbps bus, which can never acknowledge a frame. Hence CAN ERROR every
+                # time, and never once NO DATA. The five ELM327 protocol B candidates were
+                # the same mistake - ATPB sets a controller's rate, not its pins.
                 #
-                # Not one NO DATA. Either nothing lives on pins 3/11 on this truck,
-                # or the adapter was never on pins 3/11 to begin with: ATPB and STPBR
-                # configure a CAN controller's bitrate and options, and neither says
-                # anything about which wires the transceiver is connected to. Run
-                # "Which protocols this adapter has" before spending more time here.
+                # This is the corrected test. Read the replies:
                 #
-                # Kept so the negative result can be reproduced, and because another
-                # vehicle may answer differently. Ignition ON.
+                #   a reply (7xx ... 7E ...) -> MS-CAN is real and reachable
+                #   NO DATA                  -> on the right pins, nobody at that address
+                #   CAN ERROR                -> still not reaching the bus
+                #
+                # One NO DATA anywhere below is already the headline: it would mean the
+                # adapter is on pins 3/11 for the first time. Ignition ON.
 
                 ATZ
                 ATE0
                 ATH1
                 ATCAF0
+                ATCFC0
                 ATCRA
 
-                # --- the adapter's own command, if it has one
-                STP 33
-                STPBR 125000
-                STPBRR
+                # --- MS-CAN, 11-bit, ISO 15765. The rate is part of the protocol; no STPBR.
+                STP 53
+                STPRS
+
                 ATSH 726
-                023E000000000000
+                023E000000000000    # BCM
                 ATSH 720
+                023E000000000000    # IPC
+                ATSH 724
+                023E000000000000    # SCCM
+                ATSH 712
+                023E000000000000    # DSM
+                ATSH 733
+                023E000000000000    # HVAC
+                ATSH 736
+                023E000000000000    # PAM
+                ATSH 7D0
+                023E000000000000    # APIM
+                ATSH 727
+                023E000000000000    # ACM
+                ATSH 740
+                023E000000000000    # FCIM
+                ATSH 754
+                023E000000000000    # TCU
+                # --- same bus, 29-bit addressing, in case the body modules are extended.
+                STP 54
+                STPRS
+                ATSH 726
                 023E000000000000
                 ATSH 7D0
                 023E000000000000
 
-                # --- ELM protocol B, options C0
-                ATPB C0 04
-                ATSPB
-                ATSH 726
-                023E000000000000
-                ATSH 720
-                023E000000000000
-
-                # --- options 40
-                ATPB 40 04
-                ATSPB
-                ATSH 726
-                023E000000000000
-                ATSH 720
-                023E000000000000
-
-                # --- options 01
-                ATPB 01 04
-                ATSPB
-                ATSH 726
-                023E000000000000
-                ATSH 720
-                023E000000000000
-
-                # --- options 11
-                ATPB 11 04
-                ATSPB
-                ATSH 726
-                023E000000000000
-                ATSH 720
-                023E000000000000
-
-                # --- options 80
-                ATPB 80 04
-                ATSPB
-                ATSH 726
-                023E000000000000
-                ATSH 720
-                023E000000000000
+                # --- back to the powertrain bus, and prove the adapter still works. The PCM
+                #     must answer here. If it does not, the MS-CAN result above means nothing
+                #     because the adapter was broken, not the bus.
+                STP 33
+                STPRS
+                ATSH 7E0
+                ATCRA 7E8
+                0201000000000000
             """.trimIndent(),
         ),
 

@@ -477,85 +477,75 @@ STP 06
 '@
     }
     mscan = @{
-        Title = 'Which MS-CAN init works (all six failed)'
+        Title = 'Does MS-CAN answer on protocol 53'
         Body  = @'
-# ANSWERED, and the answer was no. On a 2022 F-250 every candidate below
-# returned CAN ERROR - STP 33 with STPBR 125000 (STPBRR read back 125000)
-# and all five ELM327 protocol B options bytes, against 726, 720 and 7D0.
-# Not one NO DATA. Either nothing lives on pins 3/11 on this truck, or the
-# adapter was never on pins 3/11: ATPB and STPBR configure a CAN
-# controller, not which wires it is attached to. Run -Investigation
-# protocols before spending more time here.
+# ANSWERED. The adapter's protocol table, read back with STP xx / STPRS,
+# names protocol 53 "MS CAN (ISO 15765, 125K/11B)" - pins 3/11, the right
+# rate, in one command.
 #
-# This does NOT use ATMA to judge them. Monitoring returns silence on this
-# vehicle even while a module is answering, so it cannot tell a working
-# setup from a broken one. Instead each candidate is followed by a
-# TesterPresent to addresses that live on MS-CAN, and the reply is the
-# verdict:
+# What this project used to send was STP 33 with STPBR 125000. Protocol 33
+# is "HS CAN (ISO 15765, 500K/11B)". So it selected the HIGH SPEED
+# transceiver on pins 6/14 and set it to 125 kbps: a 125 kbps node on a
+# 500 kbps bus, which can never acknowledge a frame. Hence CAN ERROR every
+# time, and never once NO DATA. The five ELM327 protocol B candidates were
+# the same mistake - ATPB sets a controller's rate, not its pins.
 #
-#   a reply (7xx ... 7E ...) -> this candidate works
-#   NO DATA                  -> configured correctly, nobody home
-#   CAN ERROR                -> the physical layer did not come up; wrong
+# This is the corrected test. Read the replies:
 #
-# The difference between NO DATA and CAN ERROR is the whole point.
-# Ignition ON.
+#   a reply (7xx ... 7E ...) -> MS-CAN is real and reachable
+#   NO DATA                  -> on the right pins, nobody at that address
+#   CAN ERROR                -> still not reaching the bus
+#
+# One NO DATA anywhere below is already the headline: it would mean the
+# adapter is on pins 3/11 for the first time. Ignition ON.
 
 ATZ
 ATE0
 ATH1
 ATCAF0
+ATCFC0
 ATCRA
 
-# --- the adapter's own command, if it has one
-STP 33
-STPBR 125000
-STPBRR
+# --- MS-CAN, 11-bit, ISO 15765. The rate is part of the protocol; no STPBR.
+STP 53
+STPRS
+
 ATSH 726
-023E000000000000
+023E000000000000    # BCM
 ATSH 720
+023E000000000000    # IPC
+ATSH 724
+023E000000000000    # SCCM
+ATSH 712
+023E000000000000    # DSM
+ATSH 733
+023E000000000000    # HVAC
+ATSH 736
+023E000000000000    # PAM
+ATSH 7D0
+023E000000000000    # APIM
+ATSH 727
+023E000000000000    # ACM
+ATSH 740
+023E000000000000    # FCIM
+ATSH 754
+023E000000000000    # TCU
+# --- same bus, 29-bit addressing, in case the body modules are extended.
+STP 54
+STPRS
+ATSH 726
 023E000000000000
 ATSH 7D0
 023E000000000000
 
-# --- ELM protocol B, options C0
-ATPB C0 04
-ATSPB
-ATSH 726
-023E000000000000
-ATSH 720
-023E000000000000
-
-# --- options 40
-ATPB 40 04
-ATSPB
-ATSH 726
-023E000000000000
-ATSH 720
-023E000000000000
-
-# --- options 01
-ATPB 01 04
-ATSPB
-ATSH 726
-023E000000000000
-ATSH 720
-023E000000000000
-
-# --- options 11
-ATPB 11 04
-ATSPB
-ATSH 726
-023E000000000000
-ATSH 720
-023E000000000000
-
-# --- options 80
-ATPB 80 04
-ATSPB
-ATSH 726
-023E000000000000
-ATSH 720
-023E000000000000
+# --- back to the powertrain bus, and prove the adapter still works. The PCM
+#     must answer here. If it does not, the MS-CAN result above means nothing
+#     because the adapter was broken, not the bus.
+STP 33
+STPRS
+ATSH 7E0
+ATCRA 7E8
+0201000000000000
 '@
     }
     burst = @{

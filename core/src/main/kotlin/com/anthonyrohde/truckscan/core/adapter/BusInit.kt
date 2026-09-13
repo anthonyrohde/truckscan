@@ -3,22 +3,28 @@ package com.anthonyrohde.truckscan.core.adapter
 /**
  * Adapter command sequences that put a bus into a usable state.
  *
- * ## Why this file has candidates rather than constants
+ * ## What this file got wrong, and how it was found
  *
- * Selecting 500 kbps HS-CAN is completely standard (`ATSP6`) and works on
- * everything. Selecting 125 kbps MS-CAN is not: it needs the ELM327
- * user-defined "protocol B", whose options byte has been documented
- * inconsistently across ELM327 datasheet revisions and is outright wrong on
- * many clones.
+ * It used to send `STP 33` for every bus and then set the rate separately with
+ * `STPBR <bitrate>`. Sweeping the adapter's own protocol table with `STP xx`
+ * followed by `STPRS` showed what `STP 33` actually is:
  *
- * Rather than hard-code one magic number and hope, we keep the plausible
- * sequences here in preference order and let [ElmAdapter.selectBus] probe them,
- * keeping the first that yields real bus traffic. On STN hardware the native
- * `STP`/`STPBR` path is tried first and is expected to succeed outright, which
- * is the main reason to recommend that hardware.
+ * ```
+ * 33  HS CAN (ISO 15765, 500K/11B)
+ * 53  MS CAN (ISO 15765, 125K/11B)
+ * ```
  *
- * If you bench-verify the correct options byte for your specific adapter,
- * pin it by moving that sequence to the head of the list.
+ * So `STP 33` + `STPBR 125000` selected the **high speed** transceiver on pins
+ * 6/14 and told it to run at 125 kbps - a 125 kbps node on a 500 kbps bus,
+ * which cannot acknowledge anything. That is why every MS-CAN attempt on the
+ * truck returned `CAN ERROR` and never once returned `NO DATA`. The five
+ * ELM327 protocol B candidates failed the same way for the same reason: `ATPB`
+ * sets a CAN controller's bitrate and options, and says nothing about which
+ * pins the transceiver is attached to.
+ *
+ * The fix is to take the protocol number from [CanBus.stnProtocolNumber] and
+ * send nothing else. The bitrate is part of the protocol; a separate `STPBR`
+ * is the exact mistake above waiting to happen again.
  */
 object BusInit {
 
@@ -37,24 +43,39 @@ object BusInit {
     )
 
     /**
-     * Native ST sequences. `STPBR` sets the bitrate of the current protocol in
-     * plain bits per second, which sidesteps the ELM divisor arithmetic
-     * entirely. `STP 33` selects ISO 15765 11-bit; `STP 34` selects 29-bit.
+     * The native ST sequence: one command, naming the transceiver and the rate
+     * together.
+     *
+     * Null when no transceiver is wired to this bus's pins, which is the case
+     * for HS-CAN2 and HS-CAN3.
      */
-    private fun stnSequence(bus: CanBus): Sequence {
-        val protocol = if (bus.extendedAddressing) "STP 34" else "STP 33"
+    private fun stnSequence(bus: CanBus): Sequence? {
+        val protocol = bus.stnProtocolNumber ?: return null
         return Sequence(
-            label = "STN native (${bus.bitrateBps / 1000}kbps)",
-            commands = listOf(protocol, "STPBR ${bus.bitrateBps}", "STPBRR"),
+            label = "STN protocol %02X".format(protocol),
+            commands = listOf("STP %02X".format(protocol)),
         )
     }
 
-    /** ELM327 fallbacks, including the user-protocol-B variants for MS-CAN. */
-    private fun elmSequences(bus: CanBus): List<Sequence> {
+    /**
+     * ELM327 fallbacks.
+     *
+     * The ELM327 command set has no concept of a second transceiver: `ATSP6`
+     * and protocol B both drive pins 6/14. The protocol B candidates are kept
+     * only for ELM327 variants with a *physical* HS/MS switch, where the pins
+     * have already been changed by hand and the chip just needs the right
+     * bitrate. On an STN adapter they were measured to do nothing useful, so
+     * they are not offered for MS-CAN there.
+     */
+    private fun elmSequences(bus: CanBus, identity: AdapterIdentity): List<Sequence> {
+        if (!bus.hasAdapterPath) return emptyList()
+
         if (bus.isHighSpeed) {
             val sp = if (bus.extendedAddressing) "ATSP7" else "ATSP6"
             return listOf(Sequence("ELM standard 500kbps", listOf(sp)))
         }
+
+        if (identity.isStn) return emptyList()
 
         // 125 kbps: data rate = 500 / divisor, so divisor = 4.
         val divisor = (500_000 / bus.bitrateBps).coerceAtLeast(1)
@@ -72,9 +93,14 @@ object BusInit {
         }
     }
 
-    /** Full preference-ordered list of sequences to try for [bus]. */
+    /**
+     * Full preference-ordered list of sequences to try for [bus].
+     *
+     * Empty means there is no way to reach the bus with this adapter, which
+     * callers must report rather than treat as a failed attempt.
+     */
     fun candidatesFor(bus: CanBus, identity: AdapterIdentity): List<Sequence> = buildList {
-        if (identity.isStn) add(stnSequence(bus))
-        addAll(elmSequences(bus))
+        if (identity.isStn) stnSequence(bus)?.let { add(it) }
+        addAll(elmSequences(bus, identity))
     }
 }

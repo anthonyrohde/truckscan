@@ -66,11 +66,35 @@ class SimulatedVehicleTransport(
         val responseId: Int get() = requestId + 8
     }
 
-    /** Bitrate the adapter is currently configured for. Defaults to HS-CAN. */
+    /**
+     * Which physical transceiver the adapter is on, and at what rate.
+     *
+     * Both are needed, and keeping only the rate was a real bug. An adapter
+     * has one transceiver per pair of connector pins; a command can retune a
+     * transceiver but cannot move it to other pins. `STP 33` + `STPBR 125000`
+     * therefore gives 125 kbps on the *high speed* pins, which reaches nothing
+     * - and a simulator that tracked only the rate would have answered as
+     * though it had reached MS-CAN. It did, for months.
+     */
+    private enum class Transceiver { HIGH_SPEED, MEDIUM_SPEED, SINGLE_WIRE }
+
+    private var selectedTransceiver: Transceiver = Transceiver.HIGH_SPEED
     private var selectedBitrate: Int = HIGH_SPEED_BPS
 
     /** Rate staged by `ATPB`, applied when `ATSPB` selects protocol B. */
     private var stagedProtocolBBitrate: Int = HIGH_SPEED_BPS
+
+    /**
+     * The adapter's protocol table, read off real hardware with `STP xx` then
+     * `STPRS`. Anything not here answers `?`, as the chip does.
+     */
+    private fun protocolTable(number: Int): Pair<Transceiver, Int>? = when (number) {
+        0x31, 0x32, 0x33, 0x34 -> Transceiver.HIGH_SPEED to HIGH_SPEED_BPS
+        0x35, 0x36 -> Transceiver.HIGH_SPEED to 250_000
+        0x51, 0x52, 0x53, 0x54 -> Transceiver.MEDIUM_SPEED to MEDIUM_SPEED_BPS
+        0x61, 0x62, 0x63, 0x64 -> Transceiver.SINGLE_WIRE to 33_333
+        else -> null
+    }
 
     private fun ascii(text: String, length: Int): ByteArray {
         val bytes = text.toByteArray(Charsets.US_ASCII)
@@ -318,14 +342,36 @@ class SimulatedVehicleTransport(
                     else HIGH_SPEED_BPS
                 ok()
             }
-            upper == "ATSPB" -> { selectedBitrate = stagedProtocolBBitrate; ok() }
-            upper == "ATSP6" || upper == "ATSP7" -> { selectedBitrate = HIGH_SPEED_BPS; ok() }
+            // Protocol B is an ELM327 protocol, and the ELM327 command set has
+            // no second transceiver: this retunes the high speed pins.
+            upper == "ATSPB" -> {
+                selectedTransceiver = Transceiver.HIGH_SPEED
+                selectedBitrate = stagedProtocolBBitrate
+                ok()
+            }
+            upper == "ATSP6" || upper == "ATSP7" -> {
+                selectedTransceiver = Transceiver.HIGH_SPEED
+                selectedBitrate = HIGH_SPEED_BPS
+                ok()
+            }
+            // STPBR retunes whichever transceiver the protocol already chose.
             upper.startsWith("STPBR") -> {
                 upper.removePrefix("STPBR").trim().toIntOrNull()
                     ?.let { selectedBitrate = it }
                 ok()
             }
-            upper.startsWith("STP ") -> { selectedBitrate = HIGH_SPEED_BPS; ok() }
+            upper.startsWith("STP ") -> {
+                val number = upper.removePrefix("STP ").trim().toIntOrNull(16)
+                val entry = number?.let { protocolTable(it) }
+                if (entry == null) {
+                    respond("?\r")
+                    prompt()
+                } else {
+                    selectedTransceiver = entry.first
+                    selectedBitrate = entry.second
+                    ok()
+                }
+            }
 
             // Everything else in the AT/ST space is accepted without effect.
             upper.startsWith("AT") || upper.startsWith("ST") -> ok()
@@ -400,8 +446,12 @@ class SimulatedVehicleTransport(
         if (module == null) return null
 
         // Bus affinity: a module is electrically unreachable unless the adapter
-        // is configured for the bus it sits on. Silence, exactly as on a truck.
-        if (module.bitrateBps != selectedBitrate) return null
+        // is on its pins *and* at its rate. Silence, exactly as on a truck.
+        val onItsPins = selectedTransceiver == when (module.bitrateBps) {
+            MEDIUM_SPEED_BPS -> Transceiver.MEDIUM_SPEED
+            else -> Transceiver.HIGH_SPEED
+        }
+        if (!onItsPins || module.bitrateBps != selectedBitrate) return null
 
         val service = request.u8(0)
 

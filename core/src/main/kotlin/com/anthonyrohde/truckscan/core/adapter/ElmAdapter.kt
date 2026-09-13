@@ -200,17 +200,21 @@ class ElmAdapter(
         }
 
         val candidates = BusInit.candidatesFor(bus, identity)
+        if (candidates.isEmpty()) {
+            throw AdapterException(
+                "${'$'}{bus.displayName} is on pins ${'$'}{bus.canHighPin}/${'$'}{bus.canLowPin}, and no " +
+                    "transceiver in ${'$'}{identity.model} is wired to them. Nothing plugged " +
+                    "into the OBD connector can reach it - the adapter's protocol table " +
+                    "has entries for pins 6/14, 3/11 and 1, and nothing else.",
+            )
+        }
         var lastApplied: BusInit.Sequence? = null
 
         for (sequence in candidates) {
             var applied = true
             for (cmd in sequence.commands) {
                 val r = rawCommand(cmd)
-                // STPBRR is a "confirm new bitrate" command that some firmware
-                // omits; never fail a sequence just because it is missing.
-                if (r.status == AdapterResponse.Status.UNKNOWN_COMMAND &&
-                    !cmd.startsWith("STPBRR")
-                ) {
+                if (r.status == AdapterResponse.Status.UNKNOWN_COMMAND) {
                     applied = false
                     break
                 }
