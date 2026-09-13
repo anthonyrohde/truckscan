@@ -23,6 +23,47 @@ Module also bridges diagnostics, so a module that physically sits on MS-CAN may
 still answer on HS-CAN1. The app reports where each module actually answered
 rather than where it was expected.
 
+## What a 2022 F-250 actually answered
+
+The table above is Ford's documented usage. These are measurements from one
+truck, with an OBDLink EX reporting `STN2231 v5.8.1`, ignition on.
+
+**HS-CAN1 and HS-CAN2 work.** The PCM answers on 7E8. A multi-bus scan reached
+the PAM on 736 and the APIM on 7D0 **on HS-CAN2 at 500 kbps** - both of which sit
+on MS-CAN on older Fords. Live data runs at a 240 ms median sweep with a 100%
+fill rate.
+
+**Nothing can be overheard.** With the PCM answering a request 150 ms earlier,
+`ATMA`, `STM` and `STMA` all returned `STOPPED`, with and without a receive
+filter. The likeliest reason is the gateway these trucks put in front of the OBD
+port: it routes diagnostic traffic on request rather than mirroring the internal
+buses. So bus discovery cannot be replaced by listening - the address sweep is
+the only way to find a module.
+
+**No MS-CAN candidate has ever worked.** Every one returns `CAN ERROR`, meaning
+no node acknowledged the frame: the adapter's own `STP 33` with `STPBR 125000`
+(`STPBRR` read back `125000`, so the bitrate took), and ELM327 protocol B with
+options bytes C0, 40, 01, 11 and 80, each against 726, 720 and 7D0. Not one
+`NO DATA`.
+
+Two readings fit, and they have not been separated yet:
+
+1. **This truck has no MS-CAN.** PAM and APIM answering on HS-CAN2 is consistent
+   with Ford having moved that traffic to a 500 kbps bus. If so, every MS-CAN
+   probe the app makes is wasted time on this vehicle.
+2. **The adapter was never on pins 3/11.** `ATPB` and `STPBR` set a CAN
+   controller's bitrate and options. Neither says anything about which wires the
+   transceiver is attached to. Six candidates may have been six ways of talking
+   to the wrong wires.
+
+The probe console's **"Which protocols this adapter has"** investigation is what
+separates them: `STP` sets a protocol without opening it, so every protocol
+number can be offered to the chip and `STPRS` asked what it is called, without
+putting anything on a bus. If the adapter has a protocol it calls MS-CAN, that
+names the command; if it does not, reading 1 is the live one.
+
+Until that is settled, do not trust this document on MS-CAN.
+
 ## What to buy
 
 **OBDLink EX (USB).** FORScan's own top recommendation, and the best option if

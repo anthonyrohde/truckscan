@@ -20,6 +20,7 @@
 .EXAMPLE
   .\probe.ps1 -ListPorts
   .\probe.ps1 -Port COM3 -Investigation alive
+  .\probe.ps1 -Port COM3 -Investigation protocols
   .\probe.ps1 -Port COM3 -ScriptFile my-script.txt
 #>
 
@@ -27,7 +28,7 @@
 param(
     [switch] $ListPorts,
     [string] $Port,
-    [ValidateSet('alive', 'monitor', 'mscan', 'burst', 'rate')]
+    [ValidateSet('alive', 'monitor', 'protocols', 'mscan', 'burst', 'rate')]
     [string] $Investigation,
     [string] $ScriptFile,
     [int]    $Baud = 115200,
@@ -227,12 +228,264 @@ ATSP6
 ATMA
 '@
     }
-    mscan = @{
-        Title = 'Which MS-CAN init works'
+    protocols = @{
+        Title = 'Which protocols this adapter has'
         Body  = @'
-# MS-CAN is 125 kbps on pins 3/11 and needs ELM327 protocol B, whose
-# options byte is documented inconsistently. The app tries five candidates
-# every time and caches none, because none was ever confirmed.
+# Asks the adapter which protocols it has, and what it calls them.
+#
+# This exists because of a measured dead end. Every MS-CAN candidate this
+# project could think of came back CAN ERROR on a 2022 F-250: STP 33 with
+# STPBR 125000 (STPBRR confirmed the 125000 took), and all five ELM327
+# protocol B options bytes. But ATPB and STPBR configure a CAN controller's
+# bitrate and options - neither says which pins the transceiver is wired
+# to. Six candidates may have been six ways of talking to the wrong wires.
+#
+# The chip knows. STP sets a protocol without opening it: an unsupported
+# number answers ? and changes nothing, a supported one is set but not
+# connected. So nothing here goes on any bus, and the ignition can be off.
+# STPRS then reports the protocol's name. Whatever this adapter calls
+# MS-CAN, it will say so below.
+#
+# Read the output for a name containing MS-CAN, MEDIUM or 125.
+ATZ
+ATE0
+
+# Where it starts, so the sweep can be read against it.
+STPR
+STPRS
+STP 00
+STPRS
+STP 01
+STPRS
+STP 02
+STPRS
+STP 03
+STPRS
+STP 04
+STPRS
+STP 05
+STPRS
+STP 06
+STPRS
+STP 07
+STPRS
+STP 08
+STPRS
+STP 09
+STPRS
+STP 0A
+STPRS
+STP 0B
+STPRS
+STP 0C
+STPRS
+STP 20
+STPRS
+STP 21
+STPRS
+STP 22
+STPRS
+STP 23
+STPRS
+STP 24
+STPRS
+STP 25
+STPRS
+STP 26
+STPRS
+STP 27
+STPRS
+STP 28
+STPRS
+STP 29
+STPRS
+STP 2A
+STPRS
+STP 2B
+STPRS
+STP 2C
+STPRS
+STP 2D
+STPRS
+STP 2E
+STPRS
+STP 2F
+STPRS
+STP 30
+STPRS
+STP 31
+STPRS
+STP 32
+STPRS
+STP 33
+STPRS
+STP 34
+STPRS
+STP 35
+STPRS
+STP 36
+STPRS
+STP 37
+STPRS
+STP 38
+STPRS
+STP 39
+STPRS
+STP 3A
+STPRS
+STP 3B
+STPRS
+STP 3C
+STPRS
+STP 3D
+STPRS
+STP 3E
+STPRS
+STP 3F
+STPRS
+STP 40
+STPRS
+STP 41
+STPRS
+STP 42
+STPRS
+STP 43
+STPRS
+STP 44
+STPRS
+STP 45
+STPRS
+STP 46
+STPRS
+STP 47
+STPRS
+STP 48
+STPRS
+STP 49
+STPRS
+STP 4A
+STPRS
+STP 4B
+STPRS
+STP 4C
+STPRS
+STP 4D
+STPRS
+STP 4E
+STPRS
+STP 4F
+STPRS
+STP 50
+STPRS
+STP 51
+STPRS
+STP 52
+STPRS
+STP 53
+STPRS
+STP 54
+STPRS
+STP 55
+STPRS
+STP 56
+STPRS
+STP 57
+STPRS
+STP 58
+STPRS
+STP 59
+STPRS
+STP 5A
+STPRS
+STP 5B
+STPRS
+STP 5C
+STPRS
+STP 5D
+STPRS
+STP 5E
+STPRS
+STP 5F
+STPRS
+STP 60
+STPRS
+STP 61
+STPRS
+STP 62
+STPRS
+STP 63
+STPRS
+STP 64
+STPRS
+STP 65
+STPRS
+STP 66
+STPRS
+STP 67
+STPRS
+STP 68
+STPRS
+STP 69
+STPRS
+STP 6A
+STPRS
+STP 6B
+STPRS
+STP 6C
+STPRS
+STP 6D
+STPRS
+STP 6E
+STPRS
+STP 6F
+STPRS
+STP 70
+STPRS
+STP 71
+STPRS
+STP 72
+STPRS
+STP 73
+STPRS
+STP 74
+STPRS
+STP 75
+STPRS
+STP 76
+STPRS
+STP 77
+STPRS
+STP 78
+STPRS
+STP 79
+STPRS
+STP 7A
+STPRS
+STP 7B
+STPRS
+STP 7C
+STPRS
+STP 7D
+STPRS
+STP 7E
+STPRS
+STP 7F
+STPRS
+
+# Back to the standard powertrain bus.
+STP 06
+'@
+    }
+    mscan = @{
+        Title = 'Which MS-CAN init works (all six failed)'
+        Body  = @'
+# ANSWERED, and the answer was no. On a 2022 F-250 every candidate below
+# returned CAN ERROR - STP 33 with STPBR 125000 (STPBRR read back 125000)
+# and all five ELM327 protocol B options bytes, against 726, 720 and 7D0.
+# Not one NO DATA. Either nothing lives on pins 3/11 on this truck, or the
+# adapter was never on pins 3/11: ATPB and STPBR configure a CAN
+# controller, not which wires it is attached to. Run -Investigation
+# protocols before spending more time here.
 #
 # This does NOT use ATMA to judge them. Monitoring returns silence on this
 # vehicle even while a module is answering, so it cannot tell a working
@@ -391,7 +644,7 @@ elseif ($Investigation) {
     $title = $Investigations[$Investigation].Title
 }
 else {
-    throw "Give -Investigation (alive, mscan, burst, rate) or -ScriptFile."
+    throw "Give -Investigation (alive, monitor, protocols, mscan, burst, rate) or -ScriptFile."
 }
 
 $parsed = @($scriptText -split "`n" | ForEach-Object { Test-Line $_ })

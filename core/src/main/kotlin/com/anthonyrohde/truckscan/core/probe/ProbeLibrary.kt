@@ -22,35 +22,109 @@ object ProbeLibrary {
         val script: String,
     )
 
+    /**
+     * Protocol numbers to walk. The ELM327 range is a single hex digit; the STN
+     * chips add two-digit numbers above it, and this project has never had a
+     * copy of the table that names them. Rather than guess which one is MS-CAN,
+     * [PROTOCOL_SWEEP] asks the chip for every one it will accept and prints
+     * the name it gives back.
+     */
+    private val PROTOCOL_SWEEP: List<Int> = (0x00..0x0C) + (0x20..0x7F)
+
+    /**
+     * `STP` sets the protocol without opening it, so this puts nothing on any
+     * bus: an unsupported number answers `?` and leaves the previous protocol
+     * alone. That is what makes a sweep like this safe to run with the truck
+     * connected.
+     */
+    private fun protocolSweep(): String = buildString {
+        appendLine(
+            """
+            # Asks the adapter which protocols it has, and what it calls them.
+            #
+            # This exists because of a measured dead end. Every MS-CAN candidate
+            # this project could think of came back CAN ERROR on a 2022 F-250:
+            # the adapter's own STP 33 with STPBR 125000 (STPBRR confirmed the
+            # 125000 took), and all five ELM327 protocol B options bytes. Looking
+            # at what those commands actually do, that is not surprising - ATPB
+            # and STPBR configure a CAN controller's bitrate and options. Nothing
+            # in them tells the adapter to route its transceiver to pins 3/11.
+            # Six candidates may have been six ways of talking to the wrong wires.
+            #
+            # The chip knows. STP sets a protocol without opening it - an
+            # unsupported number answers ? and changes nothing, and a supported
+            # one is set but not connected, so this sweep puts nothing on any
+            # bus. STPRS then reports the protocol's name. Whatever the adapter
+            # calls MS-CAN, it will say so here.
+            #
+            # Ignition can be off. Read the output for a name containing MS-CAN,
+            # MEDIUM, or 125.
+
+            ATZ
+            ATE0
+
+            # Where it starts, so the sweep can be read against it.
+            STPR
+            STPRS
+            """.trimIndent(),
+        )
+        appendLine()
+        for (protocol in PROTOCOL_SWEEP) {
+            appendLine("STP %02X".format(protocol))
+            appendLine("STPRS")
+        }
+        appendLine()
+        appendLine("# Back to the standard powertrain bus.")
+        append("STP 06")
+    }
+
     val ALL: List<Investigation> = listOf(
         Investigation(
-            name = "Which MS-CAN init works",
+            name = "Which protocols this adapter has",
             question =
-            "MS-CAN runs at 125 kbps on pins 3/11 and needs the ELM327 user-defined " +
-                "protocol B, whose options byte is documented inconsistently. The app " +
-                "tries five candidates every time and caches none, because none was " +
-                "ever confirmed. Each candidate is judged by whether a module replies, " +
-                "not by listening to the bus - monitoring reports silence on this " +
-                "vehicle even while a module is answering, so it cannot tell a working " +
-                "setup from a broken one. CAN ERROR means the physical layer did not " +
-                "come up; NO DATA means it did and nobody was home. Ignition ON.",
+            "Every MS-CAN candidate this project could think of returned CAN ERROR " +
+                "on the truck: the adapter's own STP 33 with STPBR 125000, and all " +
+                "five ELM327 protocol B options bytes. Those commands set a CAN " +
+                "controller's bitrate and options; none of them says which pins the " +
+                "transceiver is wired to, so all six may have been the wrong wires. " +
+                "Instead of guessing a seventh, this asks the chip: STP sets a " +
+                "protocol without opening it, so every number can be offered and " +
+                "STPRS asked what it is called. Whatever this adapter calls MS-CAN, " +
+                "it says so here. Nothing is put on any bus, so the ignition can be " +
+                "off.",
+            script = protocolSweep(),
+        ),
+
+        Investigation(
+            name = "Which MS-CAN init works (all six failed)",
+            question =
+            "Ran on a 2022 F-250 and every candidate returned CAN ERROR: the " +
+                "adapter's own STP 33 with STPBR 125000 - STPBRR read back 125000, " +
+                "so the bitrate took - and ELM327 protocol B with options C0, 40, " +
+                "01, 11 and 80, each tried against 726, 720 and 7D0. CAN ERROR " +
+                "means no node acknowledged, which is either nothing on those pins " +
+                "or the adapter never reached those pins. Both of those commands " +
+                "only configure a CAN controller, so the second reading is live; " +
+                "run \"Which protocols this adapter has\" first. Kept so the " +
+                "negative result can be reproduced. Ignition ON.",
             script = """
-                # MS-CAN is 125 kbps on pins 3/11 and needs ELM327 protocol B, whose
-                # options byte is documented inconsistently. The app tries five candidates
-                # every time and caches none, because none was ever confirmed.
-                #
-                # This does NOT use ATMA to judge them. Monitoring returns silence on this
-                # vehicle even while a module is answering, so it cannot tell a working
-                # setup from a broken one. Instead each candidate is followed by a
-                # TesterPresent to addresses that live on MS-CAN, and the reply is the
-                # verdict:
+                # ANSWERED, and the answer was no. On a 2022 F-250 every candidate
+                # below returned CAN ERROR - the adapter's own STP 33 with STPBR
+                # 125000 (STPBRR read back 125000, so the bitrate took) and all five
+                # ELM327 protocol B options bytes, against 726, 720 and 7D0.
                 #
                 #   a reply (7xx ... 7E ...) -> this candidate works
                 #   NO DATA                  -> configured correctly, nobody home
-                #   CAN ERROR                -> the physical layer did not come up; wrong
+                #   CAN ERROR                -> no node acknowledged
                 #
-                # The difference between NO DATA and CAN ERROR is the whole point.
-                # Ignition ON.
+                # Not one NO DATA. Either nothing lives on pins 3/11 on this truck,
+                # or the adapter was never on pins 3/11 to begin with: ATPB and STPBR
+                # configure a CAN controller's bitrate and options, and neither says
+                # anything about which wires the transceiver is connected to. Run
+                # "Which protocols this adapter has" before spending more time here.
+                #
+                # Kept so the negative result can be reproduced, and because another
+                # vehicle may answer differently. Ignition ON.
 
                 ATZ
                 ATE0
