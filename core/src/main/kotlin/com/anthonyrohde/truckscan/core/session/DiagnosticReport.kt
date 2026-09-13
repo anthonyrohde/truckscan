@@ -51,6 +51,8 @@ data class DiagnosticReport(
         val ranAtMillis: Long,
         val full: Boolean,
         val found: Int,
+        /** Buses that showed no traffic at all while being scanned. */
+        val quietBuses: List<String> = emptyList(),
         /** True when a disconnect has since discarded the results. */
         val discarded: Boolean = false,
     )
@@ -99,9 +101,22 @@ data class DiagnosticReport(
                             "no module answered.",
                     )
                     appendLine()
-                    appendLine("  A silent bus cannot be scanned, and the usual reason for one")
-                    appendLine("  is the ignition being off. Turn the key to ON - engine need")
-                    appendLine("  not be running - and scan again.")
+                    if (scan.quietBuses.isEmpty()) {
+                        // The stranger case, and worth separating: the bus was
+                        // alive and still nothing replied to a direct request.
+                        appendLine("  The buses were carrying traffic, so the vehicle was awake")
+                        appendLine("  and simply did not answer. That is unusual and worth the")
+                        appendLine("  adapter log below.")
+                    } else {
+                        appendLine(
+                            "  No traffic was seen on: ${scan.quietBuses.joinToString(", ")}.",
+                        )
+                        appendLine()
+                        appendLine("  A sleeping bus cannot answer, so the sweep could not have")
+                        appendLine("  succeeded - and it still probed every address to find that")
+                        appendLine("  out. The usual reason is the ignition being off. Turn the")
+                        appendLine("  key to ON - the engine need not be running - and scan again.")
+                    }
                 }
             }
         } else {

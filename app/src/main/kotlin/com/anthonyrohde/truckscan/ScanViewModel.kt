@@ -231,18 +231,34 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     /** [full] sweeps every address rather than only the known ones. */
     fun scanModules(full: Boolean = false) = viewModelScope.launch {
         val active = engine ?: return@launch
+
+        // Say this before the sweep rather than after. A full sweep probes 256
+        // addresses on each bus, which is minutes of work, and on a sleeping
+        // bus it cannot succeed - so the one moment this is worth knowing is
+        // before it starts, while the key is still within reach.
+        val connected = _connection.value as? ConnectionState.Connected
+        if (full && connected?.busTrafficSeen == false) {
+            _message.value = "The bus is silent, so a full sweep will probe every " +
+                "address and find nothing. Turn the ignition on first - the engine " +
+                "need not be running."
+        }
+
+        val quietBuses = linkedSetOf<String>()
         _busy.value = Busy.Scanning(if (full) "Full module sweep" else "Scanning modules", 0f)
         try {
             val found = if (full) {
                 active.fullScanVehicle { progress ->
+                    if (!progress.busHadTraffic) quietBuses += progress.bus.displayName
                     _busy.value = Busy.Scanning(
                         "Sweeping ${progress.bus.displayName} " +
-                            "(${progress.addressesProbed}/${progress.addressesTotal})",
+                            "(${progress.addressesProbed}/${progress.addressesTotal})" +
+                            if (progress.busHadTraffic) "" else " - bus silent, nothing will answer",
                         progress.addressesProbed.toFloat() / progress.addressesTotal,
                     )
                 }
             } else {
                 active.quickScanVehicle { progress ->
+                    if (!progress.busHadTraffic) quietBuses += progress.bus.displayName
                     _busy.value = Busy.Scanning(
                         "Scanning ${progress.bus.displayName}",
                         progress.addressesProbed.toFloat() / progress.addressesTotal,
@@ -254,14 +270,21 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 ranAtMillis = System.currentTimeMillis(),
                 full = full,
                 found = found.size,
+                quietBuses = quietBuses.toList(),
             )
             supportedPidCount = runCatching { active.liveData.readSupportedPids().size }.getOrNull()
             _availablePids.value = runCatching { active.liveData.availableParameters() }
                 .getOrDefault(PidCatalog.ALL)
 
             if (found.isEmpty()) {
-                _message.value = "No modules answered. Check the ignition is on and the " +
-                    "adapter is fully seated in the OBD port."
+                _message.value = if (quietBuses.isEmpty()) {
+                    "No modules answered, although the bus was carrying traffic. That " +
+                        "is unusual - the adapter log will show what was sent."
+                } else {
+                    "No modules answered. Every bus scanned was silent " +
+                        "(${quietBuses.joinToString(", ")}), which usually means the " +
+                        "ignition is off."
+                }
             }
         } catch (e: Exception) {
             _message.value = e.message

@@ -177,7 +177,31 @@ class DiagnosticReportTest {
         assertFalse(silent.contains("No module scan has been run"), silent)
         assertTrue(silent.contains("no module answered"), silent)
         assertTrue(silent.contains("full sweep"), silent)
-        assertTrue(silent.contains("ignition"), silent)
+    }
+
+    /**
+     * A sweep that found nothing on a sleeping bus and one that found nothing
+     * on a live bus are different problems. The first is a key in the wrong
+     * position; the second is worth reading the log over.
+     */
+    @Test
+    fun `a silent bus is named as the reason, and a live one is not`() {
+        val asleep = report(
+            moduleScan = DiagnosticReport.ModuleScan(
+                ranAtMillis = 1_757_000_000_000, full = true, found = 0,
+                quietBuses = listOf("HS-CAN1", "MS-CAN"),
+            ),
+        )
+        assertTrue(asleep.contains("No traffic was seen on: HS-CAN1, MS-CAN"), asleep)
+        assertTrue(asleep.contains("ignition"), asleep)
+
+        val awake = report(
+            moduleScan = DiagnosticReport.ModuleScan(
+                ranAtMillis = 1_757_000_000_000, full = true, found = 0,
+            ),
+        )
+        assertTrue(awake.contains("carrying traffic"), awake)
+        assertFalse(awake.contains("ignition"), awake)
     }
 
     @Test

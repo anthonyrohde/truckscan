@@ -32,6 +32,14 @@ data class DiscoveryProgress(
     val addressesTotal: Int,
     val found: Int,
     val currentAddress: Int,
+    /**
+     * False when the bus showed no traffic at all when it was selected.
+     *
+     * Worth carrying up to the UI. Probing 256 addresses on a sleeping bus
+     * takes the better part of a minute and cannot succeed, and "no modules
+     * answered" is a very different report when the bus was never awake.
+     */
+    val busHadTraffic: Boolean = true,
 )
 
 /**
@@ -104,7 +112,10 @@ class ModuleDiscovery(
             }
 
             onProgress?.invoke(
-                DiscoveryProgress(bus, index + 1, addresses.size, found.size, requestId),
+                DiscoveryProgress(
+                    bus, index + 1, addresses.size, found.size, requestId,
+                    busHadTraffic = selection.trafficObserved,
+                ),
             )
         }
 
