@@ -31,7 +31,10 @@ data class DiagnosticReport(
     val faults: List<String>,
     val supportedPidCount: Int?,
     val parametersOffered: Int,
+    /** What the live stream is actually polling. */
     val parametersWatched: Int,
+    /** What is ticked on the screen, which can differ mid-session. */
+    val parametersSelected: Int,
     val health: List<ParameterHealth>,
     val timing: LiveHealth.SweepTiming,
     val recentLog: List<String>,
@@ -84,7 +87,14 @@ data class DiagnosticReport(
         heading("LIVE DATA")
         line("Vehicle reports supported", supportedPidCount?.toString() ?: "not asked")
         line("Parameters offered", parametersOffered.toString())
-        line("Parameters watched", parametersWatched.toString())
+        line("Parameters streaming", parametersWatched.toString())
+        if (parametersSelected != parametersWatched) {
+            line(
+                "Parameters selected",
+                "$parametersSelected (changed since the stream started, so the " +
+                    "difference is not a failure)",
+            )
+        }
 
         if (timing.count == 0) {
             appendLine()

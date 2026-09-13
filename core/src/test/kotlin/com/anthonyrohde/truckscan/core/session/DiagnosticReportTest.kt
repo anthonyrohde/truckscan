@@ -93,6 +93,7 @@ class DiagnosticReportTest {
         supportedPidCount = 67,
         parametersOffered = 45,
         parametersWatched = 5,
+        parametersSelected = 5,
         health = health,
         timing = timing,
         recentLog = listOf(">> ATI", "<< ELM327 v1.4b"),
@@ -160,5 +161,40 @@ class DiagnosticReportTest {
     @Test
     fun `an empty module list says no scan was run rather than none found`() {
         assertTrue(report().contains("No module scan has been run"))
+    }
+}
+
+class DiagnosticReportSelectionTest {
+
+    /**
+     * Ticking more parameters after starting a stream changes the selection but
+     * not what is being polled. Reporting the selection made five healthy
+     * parameters look like five out of twenty-seven.
+     */
+    @Test
+    fun `a selection changed mid-session is called out rather than read as failure`() {
+        val text = DiagnosticReport(
+            generatedAtMillis = 0,
+            appVersion = "1.0.0",
+            device = "Pixel",
+            androidVersion = "17",
+            adapter = "STN2231",
+            transport = "USB",
+            multiBus = true,
+            activeBus = "HS-CAN1",
+            connection = "Connected",
+            modules = emptyList(),
+            faults = emptyList(),
+            supportedPidCount = 67,
+            parametersOffered = 27,
+            parametersWatched = 5,
+            parametersSelected = 27,
+            health = emptyList(),
+            timing = LiveHealth.SweepTiming(183, 240, 0, 0, 240),
+            recentLog = emptyList(),
+        ).render()
+
+        assertTrue(text.contains("Parameters streaming"), text)
+        assertTrue(text.contains("not a failure"), text)
     }
 }

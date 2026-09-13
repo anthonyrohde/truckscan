@@ -116,6 +116,17 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
     /** Supported mode 01 count as the vehicle reported it, for the report. */
     private var supportedPidCount: Int? = null
 
+    /**
+     * What the live stream is actually polling.
+     *
+     * Not the same as the current selection: a stream polls the list it was
+     * started with, so ticking more parameters afterwards changes the selection
+     * without changing what is being read. The report has to say what is
+     * happening, not what is ticked - the difference reads as parameters
+     * silently failing when nothing is wrong at all.
+     */
+    private var streamingPids: List<Pid> = emptyList()
+
     private val _recordedRows = MutableStateFlow(0)
     val recordedRows: StateFlow<Int> = _recordedRows.asStateFlow()
 
@@ -294,6 +305,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         stopLiveData()
+        streamingPids = pids
         hold = LiveValueHold()
         _staleKeys.value = emptySet()
         liveDataJob = viewModelScope.launch {
@@ -437,7 +449,9 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             faults = faultLines,
             supportedPidCount = supportedPidCount,
             parametersOffered = _availablePids.value.size,
-            parametersWatched = _selectedPids.value.size,
+            parametersWatched = streamingPids.size.takeIf { it > 0 }
+                ?: _selectedPids.value.size,
+            parametersSelected = _selectedPids.value.size,
             health = health.parameters(),
             timing = health.timing(),
             recentLog = log.entries.value.takeLast(DIAGNOSTIC_LOG_LINES)
