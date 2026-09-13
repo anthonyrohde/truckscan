@@ -107,7 +107,7 @@ object ProbeLibrary {
                 # READ SECTION A FIRST. If the truck is asleep the whole run is void, which is
                 # exactly what happened to the last MS-CAN run.
                 #
-                # Ignition ON. Engine running is better still - ATRV will say which.
+                # Engine running if the work allows it. Ignition on with the engine off is a steady drain - forty minutes of it took this truck from 11.7 V to 10.0 V and it would not start afterwards. Engine running is better still - ATRV will say which.
 
                 # ============================================================ A. is it awake
                 # ATRV is the adapter's own voltmeter and needs no bus at all.
@@ -466,7 +466,7 @@ object ProbeLibrary {
                 "at 125 kbps. That cannot acknowledge anything, which is why every "  +
                 "attempt returned CAN ERROR and never NO DATA. This is the corrected "  +
                 "test, ending on the powertrain bus so a dead adapter cannot be "  +
-                "mistaken for a dead bus. Ignition ON.",
+                "mistaken for a dead bus. Engine running if the work allows it. Ignition on with the engine off is a steady drain - forty minutes of it took this truck from 11.7 V to 10.0 V and it would not start afterwards.",
             script = """
                 # ANSWERED. The adapter's protocol table, read back with STP xx / STPRS,
                 # names protocol 53 "MS CAN (ISO 15765, 125K/11B)" - pins 3/11, the right
@@ -486,7 +486,7 @@ object ProbeLibrary {
                 #   CAN ERROR                -> still not reaching the bus
                 #
                 # One NO DATA anywhere below is already the headline: it would mean the
-                # adapter is on pins 3/11 for the first time. Ignition ON.
+                # adapter is on pins 3/11 for the first time. Engine running if the work allows it. Ignition on with the engine off is a steady drain - forty minutes of it took this truck from 11.7 V to 10.0 V and it would not start afterwards.
 
                 ATZ
                 ATE0

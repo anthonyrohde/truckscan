@@ -10,6 +10,7 @@ import com.anthonyrohde.truckscan.core.pid.PidCatalog
 import com.anthonyrohde.truckscan.core.pid.PidValue
 import com.anthonyrohde.truckscan.core.session.LiveRecording
 import com.anthonyrohde.truckscan.core.probe.ProbeLibrary
+import com.anthonyrohde.truckscan.core.vehicle.BatteryVoltage
 import com.anthonyrohde.truckscan.core.probe.ProbeRunner
 import com.anthonyrohde.truckscan.core.probe.ProbeScript
 import com.anthonyrohde.truckscan.core.session.DiagnosticReport
@@ -203,15 +204,26 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             result.onFailure { _message.value = it.message }
                 .onSuccess {
                     val state = created.connectionState.value
-                    if (state is ConnectionState.Connected && !state.busTrafficSeen) {
-                        // Deliberately says nothing about the ignition. Seeing no
-                        // traffic does not mean the vehicle is asleep - on this
-                        // truck nothing is ever overheard even with a module
-                        // answering - so advice based on it would be a guess
-                        // dressed as a diagnosis.
-                        _message.value = "Connected to ${it.model}. No free-running " +
-                            "traffic was seen, which is normal behind a gateway - " +
-                            "scan modules to find out what is there."
+                    // Battery first. It is the only thing here that can leave
+                    // someone stranded, and it outranks anything about buses.
+                    val volts = (state as? ConnectionState.Connected)?.batteryVolts
+                    val warning = volts
+                        ?.takeIf {
+                            BatteryVoltage.classify(it) == BatteryVoltage.State.CRITICAL ||
+                                BatteryVoltage.classify(it) ==
+                                BatteryVoltage.State.TOO_LOW_TO_TRUST
+                        }
+                        ?.let { BatteryVoltage.describe(it) }
+
+                    _message.value = when {
+                        warning != null -> warning
+                        state is ConnectionState.Connected && !state.busTrafficSeen ->
+                            // Says nothing about the ignition on its own. Nothing
+                            // answering is worth reporting; why it did not answer
+                            // is not something this can know.
+                            "Connected to ${it.model}. Nothing answered on the " +
+                                "powertrain bus - scan modules to find out what is there."
+                        else -> null
                     }
                 }
         } catch (e: Exception) {

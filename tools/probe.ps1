@@ -12,6 +12,12 @@
 
   Nothing is installed to run it. System.IO.Ports ships with Windows.
 
+  RUN WITH THE ENGINE RUNNING where the work allows it. A session with the
+  ignition on and the engine off is a steady drain: four runs over forty
+  minutes took a 6.7 diesel from 11.7 V to 10.0 V and it would not start
+  afterwards. This reads the battery before and after every run and refuses
+  to start below 11.5 V unless given -IgnoreBattery.
+
   READ-ONLY. Every frame is checked against a list of UDS and OBD services that
   change nothing, and anything else is refused and never sent - no module reset,
   no clearing fault codes, no security access, no routine control, no writing
@@ -34,7 +40,8 @@ param(
     [string] $ScriptFile,
     [int]    $Baud = 115200,
     [string] $Out,
-    [int]    $MonitorSeconds = 4
+    [int]    $MonitorSeconds = 4,
+    [switch] $IgnoreBattery
 )
 
 $ErrorActionPreference = 'Stop'
@@ -210,6 +217,64 @@ function Format-Reply {
     return $lines
 }
 
+
+# ---------------------------------------------------------------- battery
+
+# A diagnostic session runs with the ignition on and the engine off. That is a
+# steady drain with nothing replacing it, and on a 6.7 diesel it is not small.
+# Four runs over about forty minutes took this truck from 11.7 V to 10.0 V and
+# it would not start afterwards. The number was on screen the whole time and
+# nothing said anything about it.
+#
+# So: read it before, read it after, and say what happened in words.
+
+$WillNotStartVolts = 11.0
+$ModulesUnreliableVolts = 11.5
+$ChargingVolts = 13.2
+
+function Read-BatteryVolts {
+    param($SerialPort)
+
+    $SerialPort.Write("ATRV`r")
+    $raw = Read-Reply -SerialPort $SerialPort -TimeoutMs 2000
+    # The lookarounds matter: without them "ELM327 v1.4b" parses as 27 volts,
+    # which is the one failure this must not have - a reading that looks fine
+    # and silently removes the warning.
+    $m = [regex]::Match($raw, '(?<![\d.])(\d{1,2}(?:\.\d+)?)\s*V(?![A-Za-z0-9])',
+                        [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (-not $m.Success) { return $null }
+    $v = [double] $m.Groups[1].Value
+    if ($v -lt 1 -or $v -gt 40) { return $null }
+    return $v
+}
+
+function Show-BatteryState {
+    param([double] $Volts, [string] $When)
+
+    $text = "Battery $When`: $($Volts.ToString('0.0')) V"
+    if ($Volts -ge $ChargingVolts) {
+        Write-Host "$text - engine running and charging." -ForegroundColor Green
+    }
+    elseif ($Volts -lt $WillNotStartVolts) {
+        Write-Host "$text - THIS IS NOW A STARTING PROBLEM, NOT A DIAGNOSTIC ONE." -ForegroundColor Red
+        Write-Host "  Turn the ignition off and charge it. A Super Duty has two batteries" -ForegroundColor Red
+        Write-Host "  in parallel and one weak cell drags the pair down." -ForegroundColor Red
+    }
+    elseif ($Volts -lt $ModulesUnreliableVolts) {
+        Write-Host "$text - too low to trust a scan." -ForegroundColor Red
+        Write-Host "  Modules drop off the bus around here, so one that does not answer may" -ForegroundColor Yellow
+        Write-Host "  be short of volts rather than absent. Start the engine or charge first." -ForegroundColor Yellow
+    }
+    elseif ($Volts -lt 12.2) {
+        Write-Host "$text - down on a rested battery, and falling while the ignition is on." -ForegroundColor Yellow
+        Write-Host "  Start the engine if the work allows it." -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "$text - healthy, but the engine is not running, so this is a battery" -ForegroundColor Yellow
+        Write-Host "  being used. Do not leave the ignition on between runs." -ForegroundColor Yellow
+    }
+}
+
 # ---------------------------------------------------------------- scripts
 
 $Investigations = @{
@@ -221,7 +286,7 @@ $Investigations = @{
 # reported silence, with and without a receive filter - the gateway in
 # front of the OBD port routes diagnostic traffic on request and does
 # not mirror the internal buses. Kept because another vehicle may
-# answer differently. Ignition ON.
+# answer differently. Engine running if the work allows it. Ignition on with the engine off is a steady drain - forty minutes of it took this truck from 11.7 V to 10.0 V and it would not start afterwards.
 ATZ
 ATE0
 ATH1
@@ -487,7 +552,7 @@ STP 06
 # READ SECTION A FIRST. If the truck is asleep the whole run is void, which is
 # exactly what happened to the last MS-CAN run.
 #
-# Ignition ON. Engine running is better still - ATRV will say which.
+# Engine running if the work allows it. Ignition on with the engine off is a steady drain - forty minutes of it took this truck from 11.7 V to 10.0 V and it would not start afterwards. Engine running is better still - ATRV will say which.
 
 # ============================================================ A. is it awake
 # ATRV is the adapter's own voltmeter and needs no bus at all.
@@ -852,7 +917,7 @@ ATZ
 #   CAN ERROR                -> still not reaching the bus
 #
 # One NO DATA anywhere below is already the headline: it would mean the
-# adapter is on pins 3/11 for the first time. Ignition ON.
+# adapter is on pins 3/11 for the first time. Engine running if the work allows it. Ignition on with the engine off is a steady drain - forty minutes of it took this truck from 11.7 V to 10.0 V and it would not start afterwards.
 
 ATZ
 ATE0
@@ -908,7 +973,7 @@ ATCRA 7E8
         Body  = @'
 # Asks the PCM for a part number - a reply too long for one frame - then
 # grants the transfer. What follows the flow control line is the
-# evidence: consecutive frames, or nothing. Ignition ON.
+# evidence: consecutive frames, or nothing. Engine running if the work allows it. Ignition on with the engine off is a steady drain - forty minutes of it took this truck from 11.7 V to 10.0 V and it would not start afterwards.
 ATZ
 ATE0
 ATH1
@@ -930,7 +995,7 @@ ATCRA 7E8
 # the protocol brought up by a real request first, and STN chipsets have
 # their own monitor command, STM, which the app never tries.
 #
-# This proves the bus is alive, then tries both. Ignition ON.
+# This proves the bus is alive, then tries both. Engine running if the work allows it. Ignition on with the engine off is a steady drain - forty minutes of it took this truck from 11.7 V to 10.0 V and it would not start afterwards.
 ATZ
 ATE0
 ATH1
@@ -1020,10 +1085,38 @@ $transcript = New-Object System.Text.StringBuilder
 [void] $transcript.AppendLine("Run $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')")
 [void] $transcript.AppendLine('')
 
+$startVolts = $null
+$startedAt = Get-Date
+
 try {
     $serial.Open()
     Start-Sleep -Milliseconds 200
     if ($serial.BytesToRead -gt 0) { [void] $serial.ReadExisting() }
+
+    # Before anything else. ATRV needs no bus, no protocol and no vehicle, so
+    # there is no reason not to know this before spending forty minutes of
+    # someone's battery.
+    $serial.Write("ATE0`r")
+    [void] (Read-Reply -SerialPort $serial -TimeoutMs 2000)
+    $startVolts = Read-BatteryVolts -SerialPort $serial
+
+    if ($null -eq $startVolts) {
+        Write-Host "Battery voltage could not be read - carrying on without it." -ForegroundColor Yellow
+        [void] $transcript.AppendLine("Battery before: unreadable")
+    }
+    else {
+        Show-BatteryState -Volts $startVolts -When "before"
+        [void] $transcript.AppendLine("Battery before: $($startVolts.ToString('0.0')) V")
+
+        if ($startVolts -lt $ModulesUnreliableVolts -and -not $IgnoreBattery) {
+            Write-Host ""
+            Write-Host "Stopping here. Charge it, or start the engine, and run this again." -ForegroundColor Red
+            Write-Host "To override: add -IgnoreBattery" -ForegroundColor DarkGray
+            $serial.Close()
+            return
+        }
+    }
+    Write-Host ""
 
     foreach ($line in $parsed) {
         switch ($line.Kind) {
@@ -1063,7 +1156,38 @@ try {
     }
 }
 finally {
-    if ($serial.IsOpen) { $serial.Close() }
+    # After, and the comparison is the part worth having: two measurements and
+    # a subtraction beat any claim about battery chemistry.
+    if ($serial.IsOpen) {
+        $endVolts = Read-BatteryVolts -SerialPort $serial
+        $minutes = ((Get-Date) - $startedAt).TotalMinutes
+        if ($null -ne $endVolts) {
+            Write-Host ""
+            Show-BatteryState -Volts $endVolts -When "after"
+            [void] $transcript.AppendLine("Battery after: $($endVolts.ToString('0.0')) V")
+
+            if ($null -ne $startVolts) {
+                $drop = $startVolts - $endVolts
+                if ($drop -ge 0.1 -and $minutes -ge 1.0) {
+                    $rate = $drop / $minutes
+                    $summary = "Down $($drop.ToString('0.0')) V in $($minutes.ToString('0')) minutes."
+                    Write-Host $summary -ForegroundColor Yellow
+                    [void] $transcript.AppendLine($summary)
+                    if ($rate -gt 0) {
+                        $left = ($endVolts - $WillNotStartVolts) / $rate
+                        if ($left -ge 0) {
+                            $note = "At that rate it reaches $($WillNotStartVolts.ToString('0.0')) V in " +
+                                "roughly $($left.ToString('0')) more minutes - a straight line through a " +
+                                "curve, so an order of magnitude, not a countdown."
+                            Write-Host $note -ForegroundColor Yellow
+                            [void] $transcript.AppendLine($note)
+                        }
+                    }
+                }
+            }
+        }
+        $serial.Close()
+    }
 }
 
 if (-not $Out) {

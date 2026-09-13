@@ -22,6 +22,8 @@ sealed class ConnectionState {
         val identity: AdapterIdentity,
         val activeBus: CanBus,
         val busTrafficSeen: Boolean,
+        /** Battery volts at connect, or null if the adapter would not say. */
+        val batteryVolts: Double? = null,
     ) : ConnectionState()
     data class Failed(val reason: String) : ConnectionState()
 }
@@ -124,6 +126,9 @@ class DiagnosticEngine(
             identity = identity,
             activeBus = selection.bus,
             busTrafficSeen = selection.trafficObserved,
+            // Free, and the one number that says whether a long session is
+            // safe to start. Not fatal if the adapter will not answer.
+            batteryVolts = runCatching { adapter.readBatteryVolts() }.getOrNull(),
         )
         Result.success(identity)
     } catch (e: Exception) {

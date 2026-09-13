@@ -1,5 +1,7 @@
 package com.anthonyrohde.truckscan.core.adapter
 
+import com.anthonyrohde.truckscan.core.vehicle.BatteryVoltage
+
 import com.anthonyrohde.truckscan.core.transport.ObdTransport
 import com.anthonyrohde.truckscan.core.transport.TransportException
 import com.anthonyrohde.truckscan.core.util.Hex
@@ -397,6 +399,19 @@ class ElmAdapter(
         require(data.size <= 8) { "A CAN 2.0 frame carries at most 8 bytes, got ${data.size}" }
         val response = rawCommand(data.toHex(), 400)
         response.lines.mapNotNull { CanFrame.parse(it, extendedAddressing) }
+    }
+
+    /**
+     * Battery voltage at the OBD port, or null if the adapter would not say.
+     *
+     * `ATRV` needs no bus, no protocol and no vehicle, so there is never a
+     * reason not to know this. It is here because a session runs with the
+     * ignition on and the engine off, which is a steady drain: forty minutes of
+     * it took a 6.7 diesel from 11.7 V to 10.0 V and the truck would not start
+     * afterwards, with the number on screen the whole time.
+     */
+    suspend fun readBatteryVolts(): Double? = mutex.withLock {
+        BatteryVoltage.parse(rawCommand("ATRV").text)
     }
 
     /** Escape hatch for raw AT/ST commands, e.g. a terminal screen in the UI. */

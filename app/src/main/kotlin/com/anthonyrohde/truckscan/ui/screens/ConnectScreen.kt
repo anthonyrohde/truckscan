@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.anthonyrohde.truckscan.ScanViewModel
 import com.anthonyrohde.truckscan.core.session.ConnectionState
+import com.anthonyrohde.truckscan.core.vehicle.BatteryVoltage
 import com.anthonyrohde.truckscan.transport.AdapterCatalog
 
 @Composable
@@ -109,13 +110,30 @@ private fun ConnectedCard(state: ConnectionState.Connected, viewModel: ScanViewM
                 "Multi-bus capable",
                 if (state.identity.supportsMultiBus) "yes" else "no - HS-CAN1 only",
             )
-            DataRow("Bus traffic", if (state.busTrafficSeen) "seen" else "quiet")
+            DataRow("Modules answering", if (state.busTrafficSeen) "yes" else "none")
+
+            state.batteryVolts?.let { volts ->
+                DataRow("Battery", "%.1f V".format(volts))
+            }
 
             if (!state.busTrafficSeen) {
                 Explanation(
-                    "The bus is configured but silent. That is normal with the key " +
-                        "off; turn the ignition on to wake the modules.",
+                    "Nothing answered a request on this bus. With the key off that is " +
+                        "normal. With the key on it means the modules are not there, " +
+                        "or not awake.",
                 )
+            }
+
+            // The warning this app owes the user. A session runs with the
+            // ignition on and the engine off, and forty minutes of that took a
+            // 6.7 diesel from 11.7 V to 10.0 V and left it unable to start,
+            // with the voltage on screen the whole time and nothing said.
+            state.batteryVolts?.let { volts ->
+                if (BatteryVoltage.classify(volts) != BatteryVoltage.State.CHARGING &&
+                    BatteryVoltage.classify(volts) != BatteryVoltage.State.HEALTHY
+                ) {
+                    Explanation(BatteryVoltage.describe(volts))
+                }
             }
             if (!state.identity.supportsMultiBus) {
                 Explanation(
