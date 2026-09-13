@@ -208,7 +208,26 @@ class LiveDataPoller(
      * So: keep reading until the matching echo turns up or the deadline passes.
      * Nothing is re-sent, because the answer is already on its way.
      */
-    private suspend fun readParameter(pid: Int): Answer {
+    /**
+     * One exchange, not just one command: [readParameterLocked] can call
+     * `channel.receive` several times while hunting for the reply that
+     * actually answers this PID, and nothing else may touch the adapter's
+     * header in the meantime. Without this, a fault scan or an As-Built read
+     * running at the same time can reset the header mid-sweep - measured on a
+     * real truck, where it turned a clean PCM read into a bus error and a
+     * working module into "no configuration blocks".
+     *
+     * The body is a separate function, not inlined here, so it can use plain
+     * `return` throughout rather than a labelled one - a `while (true)` as the
+     * last statement of a lambda has no useful type of its own, and asking the
+     * compiler to infer one through two layers of generic delegation
+     * ([IsoTpChannel.exclusive] calling [ElmAdapter.exclusive]) is asking for
+     * exactly the kind of inference failure this sidesteps.
+     */
+    private suspend fun readParameter(pid: Int): Answer =
+        channel.exclusive { readParameterLocked(pid) }
+
+    private suspend fun readParameterLocked(pid: Int): Answer {
         val deadline = System.currentTimeMillis() + PID_TIMEOUT_MS
         var response = channel.request(
             VehicleProfiles.OBD_FUNCTIONAL_REQUEST,

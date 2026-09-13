@@ -73,7 +73,11 @@ class BusRouter(
         }
 
         logger?.invoke("Switching to ${bus.displayName}")
-        adapter.selectBus(bus)
+        // One exchange, same as a request: selectBus tries several candidate
+        // sequences and, on a fresh bus, probes for traffic - several separate
+        // commands that must not be interleaved with anything else touching
+        // this adapter, or the switch itself is what gets corrupted.
+        adapter.exclusive { adapter.selectBus(bus) }
         broughtUp += bus
         switchCount++
         return true

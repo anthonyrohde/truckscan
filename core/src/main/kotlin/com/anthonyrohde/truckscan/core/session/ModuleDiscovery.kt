@@ -74,7 +74,11 @@ class ModuleDiscovery(
         readIdentification: Boolean = true,
         onProgress: ((DiscoveryProgress) -> Unit)? = null,
     ): List<DiscoveredModule> {
-        val selection = adapter.selectBus(bus)
+        // Bus selection is its own exchange - candidate sequences, a traffic
+        // probe - and must not interleave with anything else on this adapter,
+        // including a live-data poll that happens to be running at the same
+        // time. See ElmAdapter.exclusive.
+        val selection = adapter.exclusive { adapter.selectBus(bus) }
         logger?.invoke(
             "Scanning ${bus.displayName} via ${selection.sequenceLabel}" +
                 if (selection.trafficObserved) " - traffic seen" else "",

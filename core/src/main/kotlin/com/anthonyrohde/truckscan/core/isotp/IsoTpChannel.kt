@@ -48,6 +48,22 @@ class IsoTpChannel(
     private val padTo: Int get() = if (config.padFrames) 8 else 0
 
     /**
+     * Runs [block] as one exchange with the adapter, excluding any other
+     * exchange - a request, a bus switch, another module's poll - until it
+     * finishes.
+     *
+     * [request], [receive] and [send] each talk to the adapter over several
+     * separate calls (set header, set filter, transmit, collect), and a caller
+     * that needs more than one of those calls to happen as a unit - a UDS
+     * conversation that may retry across a "response pending", a parameter read
+     * that keeps reading past a reply meant for something else - must wrap the
+     * whole thing in this, not just one call. See [ElmAdapter.exclusive] for
+     * why this is a second lock rather than reusing the one inside those
+     * individual calls.
+     */
+    suspend fun <T> exclusive(block: suspend () -> T): T = adapter.exclusive(block)
+
+    /**
      * Frames that arrived with the previous message but belong to the next one.
      *
      * One adapter read routinely returns more than one CAN frame, and they are

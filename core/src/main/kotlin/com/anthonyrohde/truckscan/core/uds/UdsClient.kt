@@ -51,6 +51,27 @@ class UdsClient(
         service: UdsService,
         requestData: ByteArray = ByteArray(0),
         timeoutMillis: Long = DEFAULT_TIMEOUT_MS,
+    ): ByteArray = channel.exclusive { executeLocked(service, requestData, timeoutMillis) }
+
+    /**
+     * The whole conversation, not just the first request, is one exchange: a
+     * "response pending" can retry `channel.receive` several times before the
+     * real answer arrives, and nothing else may touch the adapter's header or
+     * filter while that is happening. [execute] holds [IsoTpChannel.exclusive]
+     * for the whole of this function - see [ElmAdapter.exclusive] for why that
+     * matters: a fault scan and a live-data poll running at once on a real
+     * truck corrupted each other's requests this way.
+     *
+     * Kept as a separate function using plain `return` throughout, rather than
+     * inlined into the `exclusive { }` block with a labelled one - a
+     * `while (true)` as a lambda's last statement has no useful type of its
+     * own, and this sidesteps asking the compiler to infer one through two
+     * layers of generic delegation.
+     */
+    private suspend fun executeLocked(
+        service: UdsService,
+        requestData: ByteArray,
+        timeoutMillis: Long,
     ): ByteArray {
         val request = byteArrayOf(service.sid.toByte()) + requestData
         var response = channel.request(txId, rxId, request, timeoutMillis)
@@ -116,13 +137,15 @@ class UdsClient(
     /** Service 0x3E. Keeps a non-default session alive; must be sent every ~2 s. */
     suspend fun testerPresent(suppressResponse: Boolean = true) {
         if (suppressResponse) {
-            channel.send(
-                txId,
-                byteArrayOf(
-                    UdsService.TESTER_PRESENT.sid.toByte(),
-                    SUPPRESS_POSITIVE_RESPONSE.toByte(),
-                ),
-            )
+            channel.exclusive {
+                channel.send(
+                    txId,
+                    byteArrayOf(
+                        UdsService.TESTER_PRESENT.sid.toByte(),
+                        SUPPRESS_POSITIVE_RESPONSE.toByte(),
+                    ),
+                )
+            }
         } else {
             execute(UdsService.TESTER_PRESENT, byteArrayOf(0x00))
         }

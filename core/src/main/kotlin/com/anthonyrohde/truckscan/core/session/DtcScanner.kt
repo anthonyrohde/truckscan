@@ -129,14 +129,18 @@ class DtcScanner(
             readFailure = "service 0x19 did not complete: ${e.message ?: e::class.simpleName}"
         }
 
-        // Fallback: legacy mode 03, two-byte codes and no status detail.
+        // Fallback: legacy mode 03, two-byte codes and no status detail. One
+        // request, no response-pending retries, but still an exchange that
+        // must not be interleaved with whatever else is talking to the adapter.
         return try {
-            val body = channel.request(
-                module.module.requestId,
-                module.module.responseId,
-                byteArrayOf(0x03),
-                3_000,
-            )
+            val body = channel.exclusive {
+                channel.request(
+                    module.module.requestId,
+                    module.module.responseId,
+                    byteArrayOf(0x03),
+                    3_000,
+                )
+            }
             if (body.isEmpty() || body[0] != 0x43.toByte()) {
                 ModuleDtcResult(module, emptyList(), "Module did not answer mode 03 either")
             } else {

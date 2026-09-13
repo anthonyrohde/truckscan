@@ -68,15 +68,57 @@ data class BusSelection(
  *
  * Owns the request-response discipline of the adapter's serial protocol: every
  * command is terminated with CR and the adapter replies with one or more CR
- * separated lines followed by a `>` prompt. All access is serialised through a
- * mutex because there is exactly one pipe and interleaving two requests
- * produces responses that cannot be attributed.
+ * separated lines followed by a `>` prompt.
+ *
+ * ## Two locks, not one, and why
+ *
+ * [mutex] serialises one raw command: write, then read until the prompt. That
+ * is necessary but not sufficient. A logical exchange - set the header, set the
+ * filter, send, reassemble a segmented reply - is several calls to this class,
+ * each independently locked and released. Between any two of them, another
+ * coroutine talking to the same adapter can run its own command and change the
+ * header or filter the first exchange was relying on.
+ *
+ * This happened on a real truck: a fault scan and the live-data poller were
+ * running at once, both against this one adapter. The scan set the header to
+ * the SYNC module, then the poll's own tick reset it to the broadcast address
+ * before the scan's request frame went out - so the request that should have
+ * gone to one module went out as a broadcast instead, and whichever module
+ * answered was then filtered out by [IsoTpChannel] for coming from the wrong
+ * address. Module discovery reported a bus error where the bus was fine; an
+ * As-Built read reported no configuration blocks from a module that had
+ * answered cleanly minutes earlier. Every part behaved correctly in isolation.
+ *
+ * [exclusive] is the fix: a second, separate lock held for a whole logical
+ * exchange, not one command. [IsoTpChannel] and [BusRouter] use it to make a
+ * request-and-response, a burst of consecutive frames, or a bus switch atomic
+ * with respect to everything else touching this adapter. Two different `Mutex`
+ * instances rather than one reentrant lock, because a caller holding
+ * [exclusive] still needs to call the individual command methods below, which
+ * hold [mutex] - and `Mutex.withLock` is not reentrant, so trying to acquire
+ * the same lock twice from inside itself would simply hang.
+ *
+ * Two coroutines can still both want the adapter at once - nothing makes one
+ * physical serial port faster - so a scan running while live data streams will
+ * still be slower than either alone. What [exclusive] guarantees is that they
+ * take turns rather than talk over each other.
  */
 class ElmAdapter(
     private val transport: ObdTransport,
     private val logger: ((String) -> Unit)? = null,
 ) {
     private val mutex = Mutex()
+
+    /** See the class doc: a whole exchange, not one command. */
+    private val exchangeMutex = Mutex()
+
+    /**
+     * Runs [block] as one exchange, excluding every other exchange on this
+     * adapter - a bus switch, another request, a live-data tick - until it
+     * completes.
+     */
+    suspend fun <T> exclusive(block: suspend () -> T): T = exchangeMutex.withLock { block() }
+
     private val buffer = StringBuilder()
 
     private var identity: AdapterIdentity = AdapterIdentity("")
