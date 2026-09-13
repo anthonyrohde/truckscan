@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
@@ -58,6 +59,7 @@ import com.anthonyrohde.truckscan.ui.screens.ImportScreen
 import com.anthonyrohde.truckscan.ui.screens.LiveDataScreen
 import com.anthonyrohde.truckscan.ui.screens.LogScreen
 import com.anthonyrohde.truckscan.ui.screens.ModulesScreen
+import com.anthonyrohde.truckscan.ui.screens.ProbeScreen
 import com.anthonyrohde.truckscan.ui.screens.RoutinesScreen
 import com.anthonyrohde.truckscan.ui.screens.SectionHeader
 import com.anthonyrohde.truckscan.ui.theme.TruckScanTheme
@@ -130,6 +132,11 @@ private enum class Secondary(
         "log", "Adapter log",
         "Raw traffic to and from the adapter",
         Icons.Filled.Terminal,
+    ),
+    PROBE(
+        "probe", "Probe",
+        "Run read-only adapter commands and record what comes back",
+        Icons.Filled.Science,
     ),
 }
 
@@ -215,6 +222,7 @@ private fun AppRoot() {
                 composable(Secondary.ROUTINES.route) { RoutinesScreen(viewModel) }
                 composable(Secondary.IMPORT.route) { ImportScreen(viewModel) }
                 composable(Secondary.LOG.route) { LogScreen(viewModel) }
+                composable(Secondary.PROBE.route) { ProbeScreen(viewModel) }
             }
         }
     }

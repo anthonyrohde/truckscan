@@ -9,6 +9,9 @@ import com.anthonyrohde.truckscan.core.pid.Pid
 import com.anthonyrohde.truckscan.core.pid.PidCatalog
 import com.anthonyrohde.truckscan.core.pid.PidValue
 import com.anthonyrohde.truckscan.core.session.LiveRecording
+import com.anthonyrohde.truckscan.core.probe.ProbeLibrary
+import com.anthonyrohde.truckscan.core.probe.ProbeRunner
+import com.anthonyrohde.truckscan.core.probe.ProbeScript
 import com.anthonyrohde.truckscan.core.session.DiagnosticReport
 import com.anthonyrohde.truckscan.core.util.Hex
 import com.anthonyrohde.truckscan.core.session.LiveHealth
@@ -498,6 +501,53 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             recentLog = log.entries.value.takeLast(DIAGNOSTIC_LOG_LINES)
                 .map { "${it.time}  ${it.message}" },
         ).render()
+    }
+
+    // ------------------------------------------------------------------ probe
+
+    val investigations: List<ProbeLibrary.Investigation> get() = ProbeLibrary.ALL
+
+    private val _probeTranscript = MutableStateFlow<String?>(null)
+    val probeTranscript: StateFlow<String?> = _probeTranscript.asStateFlow()
+
+    /** What a script would do, shown before it is allowed to run. */
+    fun describeScript(script: String): String =
+        ProbeScript.describe(ProbeScript.parse(script))
+
+    /**
+     * Runs a script and keeps the transcript.
+     *
+     * The parse happens here as well as in the preview, so what runs is checked
+     * rather than trusted to have been checked - a preview the user never
+     * looked at is not a safety control.
+     */
+    fun runProbe(title: String, script: String) = viewModelScope.launch {
+        val active = engine ?: run {
+            _message.value = "Connect to an adapter first."
+            return@launch
+        }
+        val parsed = ProbeScript.parse(script)
+        _busy.value = Busy.Working("Probing")
+        try {
+            val steps = ProbeRunner(active.adapter).run(parsed) { done, total ->
+                _busy.value = Busy.Working("Probing ($done/$total)")
+            }
+            _probeTranscript.value = ProbeRunner.transcript(title, steps)
+            val refused = parsed.refusals.size
+            _message.value = if (refused == 0) {
+                "Probe finished: ${steps.count { it.sent }} command(s) sent."
+            } else {
+                "Probe finished. $refused line(s) were refused and not sent."
+            }
+        } catch (e: Exception) {
+            _message.value = e.message
+        } finally {
+            _busy.value = Busy.Idle
+        }
+    }
+
+    fun clearProbeTranscript() {
+        _probeTranscript.value = null
     }
 
     // ---------------------------------------------------------------- As-Built
