@@ -35,7 +35,7 @@
 param(
     [switch] $ListPorts,
     [string] $Port,
-    [ValidateSet('alive', 'monitor', 'protocols', 'primitives', 'deeper', 'mscan', 'burst', 'rate')]
+    [ValidateSet('alive', 'monitor', 'protocols', 'primitives', 'deeper', 'verify', 'mscan', 'burst', 'rate')]
     [string] $Investigation,
     [string] $ScriptFile,
     [int]    $Baud = 115200,
@@ -896,6 +896,77 @@ ATSH 18DB33F1
 ATZ
 '@
     }
+    verify = @{
+        Title = 'Confirm the cluster decoders against the truck'
+        Body  = @'
+# Confirms the decoders the cluster relies on that have never been checked
+# against a vehicle, and reads every gauge the cluster draws.
+#
+# Two of these are guesses from the standard rather than from this truck, and
+# a wrong divisor produces a plausible number rather than an error - which is
+# the worst kind of wrong for a gauge. Both are checkable in one reading:
+#
+#   PID A6, odometer. The cluster in this truck read 35707.4 km. Four bytes,
+#   tenths of a kilometre, so a correct decode is 0x000572D2 = 357074. If the
+#   bytes say something else, the scaling is wrong and the gauge is wrong.
+#
+#   PID 87, manifold absolute pressure. This is ABSOLUTE, so at idle it reads
+#   atmospheric - it should agree with barometric pressure (PID 33) to within
+#   a couple of kPa. Five bytes: a status byte then two 16-bit readings, said
+#   to be thirty-seconds of a kPa. If B,C over 32 does not land near the
+#   barometer, the divisor is wrong.
+#
+# Engine running. Idle is what makes the manifold check work.
+
+ATZ
+ATE0
+ATL0
+ATS0
+ATH1
+ATAL
+ATCAF0
+ATCFC0
+ATAT1
+STP 33
+ATSH 7E0
+ATCRA 7E8
+
+# --- the liveness check, and the battery. ATRV is the one that matters now.
+ATRV
+0201000000000000
+
+# ================================================ the two unconfirmed ones
+# Barometric first, so the manifold reading has something to be compared with
+# in the same run and the same weather.
+0201330000000000
+0201870000000000
+0201A60000000000
+
+# ======================================================= every cluster gauge
+02010C0000000000    # engine speed
+02010D0000000000    # vehicle speed
+0201050000000000    # coolant temperature
+02015C0000000000    # engine oil temperature
+02012F0000000000    # fuel tank level
+0201420000000000    # control module voltage
+0201460000000000    # ambient air temperature
+0201780000000000    # exhaust gas temperature
+0201770000000000    # charge air cooler temperature
+0201040000000000    # calculated engine load
+
+# ================================ worth having, and not decoded by this app
+# 9D is engine fuel rate and 7A is DPF differential pressure. Neither is in
+# the catalogue, because neither has a reading to check the scaling against.
+# Recording the raw bytes here is what makes adding them later a measurement
+# rather than another guess.
+02019D0000000000
+02017A0000000000
+02016F0000000000    # turbocharger compressor inlet pressure
+0201700000000000    # boost pressure control
+
+ATZ
+'@
+    }
     mscan = @{
         Title = 'Does MS-CAN answer on protocol 53'
         Body  = @'
@@ -1054,7 +1125,7 @@ elseif ($Investigation) {
     $title = $Investigations[$Investigation].Title
 }
 else {
-    throw "Give -Investigation (alive, monitor, protocols, primitives, deeper, mscan, burst, rate) or -ScriptFile."
+    throw "Give -Investigation (alive, monitor, protocols, primitives, deeper, verify, mscan, burst, rate) or -ScriptFile."
 }
 
 $parsed = @($scriptText -split "`n" | ForEach-Object { Test-Line $_ })

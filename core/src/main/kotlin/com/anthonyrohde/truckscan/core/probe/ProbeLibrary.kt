@@ -456,6 +456,80 @@ object ProbeLibrary {
         ),
 
         Investigation(
+            name = "Confirm the cluster decoders against the truck",
+            question =
+            "Two decoders the cluster depends on have never been checked against a vehicle, and a wrong divisor produces a plausible number rather than an error. Both are settled by one run. The odometer, PID A6, has a known answer: this truck's cluster reads 35707.4 km, so the four bytes should be 0x000572D2. Manifold pressure, PID 87, is absolute, so at idle it is atmospheric and must agree with the barometer on PID 33. The run also reads every gauge the cluster draws, and records raw bytes for fuel rate, DPF differential pressure and the two turbocharger pressures, so adding those later is a measurement rather than another guess. Engine running - idle is what makes the manifold check work.",
+            script = """
+                # Confirms the decoders the cluster relies on that have never been checked
+                # against a vehicle, and reads every gauge the cluster draws.
+                #
+                # Two of these are guesses from the standard rather than from this truck, and
+                # a wrong divisor produces a plausible number rather than an error - which is
+                # the worst kind of wrong for a gauge. Both are checkable in one reading:
+                #
+                #   PID A6, odometer. The cluster in this truck read 35707.4 km. Four bytes,
+                #   tenths of a kilometre, so a correct decode is 0x000572D2 = 357074. If the
+                #   bytes say something else, the scaling is wrong and the gauge is wrong.
+                #
+                #   PID 87, manifold absolute pressure. This is ABSOLUTE, so at idle it reads
+                #   atmospheric - it should agree with barometric pressure (PID 33) to within
+                #   a couple of kPa. Five bytes: a status byte then two 16-bit readings, said
+                #   to be thirty-seconds of a kPa. If B,C over 32 does not land near the
+                #   barometer, the divisor is wrong.
+                #
+                # Engine running. Idle is what makes the manifold check work.
+
+                ATZ
+                ATE0
+                ATL0
+                ATS0
+                ATH1
+                ATAL
+                ATCAF0
+                ATCFC0
+                ATAT1
+                STP 33
+                ATSH 7E0
+                ATCRA 7E8
+
+                # --- the liveness check, and the battery. ATRV is the one that matters now.
+                ATRV
+                0201000000000000
+
+                # ================================================ the two unconfirmed ones
+                # Barometric first, so the manifold reading has something to be compared with
+                # in the same run and the same weather.
+                0201330000000000
+                0201870000000000
+                0201A60000000000
+
+                # ======================================================= every cluster gauge
+                02010C0000000000    # engine speed
+                02010D0000000000    # vehicle speed
+                0201050000000000    # coolant temperature
+                02015C0000000000    # engine oil temperature
+                02012F0000000000    # fuel tank level
+                0201420000000000    # control module voltage
+                0201460000000000    # ambient air temperature
+                0201780000000000    # exhaust gas temperature
+                0201770000000000    # charge air cooler temperature
+                0201040000000000    # calculated engine load
+
+                # ================================ worth having, and not decoded by this app
+                # 9D is engine fuel rate and 7A is DPF differential pressure. Neither is in
+                # the catalogue, because neither has a reading to check the scaling against.
+                # Recording the raw bytes here is what makes adding them later a measurement
+                # rather than another guess.
+                02019D0000000000
+                02017A0000000000
+                02016F0000000000    # turbocharger compressor inlet pressure
+                0201700000000000    # boost pressure control
+
+                ATZ
+            """.trimIndent(),
+        ),
+
+        Investigation(
             name = "Does MS-CAN answer on protocol 53",
             question =
             "The adapter's own protocol table, read back with STP xx and STPRS, "  +
