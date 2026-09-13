@@ -75,6 +75,7 @@ class DiagnosticReportTest {
 
     private fun report(
         modules: List<DiagnosticReport.ModuleLine> = emptyList(),
+        moduleScan: DiagnosticReport.ModuleScan? = null,
         health: List<ParameterHealth> = emptyList(),
         timing: LiveHealth.SweepTiming = LiveHealth.SweepTiming(0, 0, 0, 0, 0),
         faults: List<String> = emptyList(),
@@ -89,6 +90,7 @@ class DiagnosticReportTest {
         activeBus = "HS-CAN1",
         connection = "Connected",
         modules = modules,
+        moduleScan = moduleScan,
         faults = faults,
         supportedPidCount = 67,
         parametersOffered = 45,
@@ -158,9 +160,49 @@ class DiagnosticReportTest {
         assertTrue(text.contains("Live data has not been started"), text)
     }
 
+    /**
+     * The three states are genuinely different and must never be conflated.
+     * Reporting "no scan has been run" to somebody who just ran one sends them
+     * to look for a bug in the app rather than at the key in the ignition.
+     */
     @Test
-    fun `an empty module list says no scan was run rather than none found`() {
-        assertTrue(report().contains("No module scan has been run"))
+    fun `never scanned is distinct from scanned and silent`() {
+        assertTrue(report().contains("No module scan has been run this session"))
+
+        val silent = report(
+            moduleScan = DiagnosticReport.ModuleScan(
+                ranAtMillis = 1_757_000_000_000, full = true, found = 0,
+            ),
+        )
+        assertFalse(silent.contains("No module scan has been run"), silent)
+        assertTrue(silent.contains("no module answered"), silent)
+        assertTrue(silent.contains("full sweep"), silent)
+        assertTrue(silent.contains("ignition"), silent)
+    }
+
+    @Test
+    fun `results thrown away by a disconnect say so rather than reading as silence`() {
+        val text = report(
+            moduleScan = DiagnosticReport.ModuleScan(
+                ranAtMillis = 1_757_000_000_000, full = true, found = 6, discarded = true,
+            ),
+        )
+        assertTrue(text.contains("disconnect"), text)
+        assertTrue(text.contains("found 6"), text)
+        assertFalse(text.contains("no module answered"), text)
+    }
+
+    @Test
+    fun `a scan that found modules is stamped with when and what kind`() {
+        val text = report(
+            modules = listOf(
+                DiagnosticReport.ModuleLine("PCM", "7E0", "HS-CAN1", answered = true),
+            ),
+            moduleScan = DiagnosticReport.ModuleScan(
+                ranAtMillis = 1_757_000_000_000, full = false, found = 1,
+            ),
+        )
+        assertTrue(text.contains("quick scan at"), text)
     }
 }
 
@@ -184,6 +226,7 @@ class DiagnosticReportSelectionTest {
             activeBus = "HS-CAN1",
             connection = "Connected",
             modules = emptyList(),
+            moduleScan = null,
             faults = emptyList(),
             supportedPidCount = 67,
             parametersOffered = 27,

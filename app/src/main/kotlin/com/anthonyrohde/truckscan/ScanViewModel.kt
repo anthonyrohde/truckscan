@@ -127,6 +127,14 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
      */
     private var streamingPids: List<Pid> = emptyList()
 
+    /**
+     * The last module scan, kept even after a disconnect clears its results.
+     *
+     * Without it an empty module list is ambiguous between "nobody scanned"
+     * and "the vehicle answered nothing", which are opposite problems.
+     */
+    private var lastModuleScan: DiagnosticReport.ModuleScan? = null
+
     private val _recordedRows = MutableStateFlow(0)
     val recordedRows: StateFlow<Int> = _recordedRows.asStateFlow()
 
@@ -212,6 +220,10 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         _connection.value = ConnectionState.Disconnected
         _modules.value = emptyList()
         _faults.value = null
+        // The results are gone but the fact of the scan is not: a report that
+        // forgot it would say nobody had scanned, which is a different problem
+        // from one whose answers were thrown away.
+        lastModuleScan = lastModuleScan?.copy(discarded = true)
     }
 
     // --------------------------------------------------------------- discovery
@@ -238,6 +250,11 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             _modules.value = found
+            lastModuleScan = DiagnosticReport.ModuleScan(
+                ranAtMillis = System.currentTimeMillis(),
+                full = full,
+                found = found.size,
+            )
             supportedPidCount = runCatching { active.liveData.readSupportedPids().size }.getOrNull()
             _availablePids.value = runCatching { active.liveData.availableParameters() }
                 .getOrDefault(PidCatalog.ALL)
@@ -446,6 +463,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 ConnectionState.Disconnected -> "Disconnected"
             },
             modules = modules,
+            moduleScan = lastModuleScan,
             faults = faultLines,
             supportedPidCount = supportedPidCount,
             parametersOffered = _availablePids.value.size,

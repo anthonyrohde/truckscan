@@ -28,6 +28,14 @@ data class DiagnosticReport(
     val activeBus: String?,
     val connection: String,
     val modules: List<ModuleLine>,
+    /**
+     * What happened the last time modules were scanned, if they ever were.
+     *
+     * An empty module list on its own is ambiguous in the worst way: it means
+     * either "nobody has scanned" or "a scan ran and the vehicle said nothing",
+     * and those call for opposite next steps. Never infer one from the other.
+     */
+    val moduleScan: ModuleScan?,
     val faults: List<String>,
     val supportedPidCount: Int?,
     val parametersOffered: Int,
@@ -39,6 +47,14 @@ data class DiagnosticReport(
     val timing: LiveHealth.SweepTiming,
     val recentLog: List<String>,
 ) {
+    data class ModuleScan(
+        val ranAtMillis: Long,
+        val full: Boolean,
+        val found: Int,
+        /** True when a disconnect has since discarded the results. */
+        val discarded: Boolean = false,
+    )
+
     data class ModuleLine(
         val name: String,
         val address: String,
@@ -62,9 +78,39 @@ data class DiagnosticReport(
         line("Connection", connection)
 
         heading("MODULES")
+        val scan = moduleScan
         if (modules.isEmpty()) {
-            appendLine("  No module scan has been run.")
+            when {
+                scan == null ->
+                    appendLine("  No module scan has been run this session.")
+
+                scan.discarded -> {
+                    appendLine(
+                        "  A ${scanKind(scan)} ran at ${TIMESTAMP.format(Instant.ofEpochMilli(scan.ranAtMillis))} " +
+                            "and found ${scan.found}, but a disconnect has since",
+                    )
+                    appendLine("  discarded the results. Scan again while connected.")
+                }
+
+                else -> {
+                    appendLine(
+                        "  A ${scanKind(scan)} ran at " +
+                            "${TIMESTAMP.format(Instant.ofEpochMilli(scan.ranAtMillis))} and " +
+                            "no module answered.",
+                    )
+                    appendLine()
+                    appendLine("  A silent bus cannot be scanned, and the usual reason for one")
+                    appendLine("  is the ignition being off. Turn the key to ON - engine need")
+                    appendLine("  not be running - and scan again.")
+                }
+            }
         } else {
+            scan?.let {
+                appendLine(
+                    "  ${scanKind(it)} at " +
+                        TIMESTAMP.format(Instant.ofEpochMilli(it.ranAtMillis)),
+                )
+            }
             val answered = modules.count { it.answered }
             appendLine("  $answered of ${modules.size} answered.")
             appendLine()
@@ -139,6 +185,8 @@ data class DiagnosticReport(
             recentLog.forEach { appendLine("  $it") }
         }
     }
+
+    private fun scanKind(scan: ModuleScan) = if (scan.full) "full sweep" else "quick scan"
 
     private fun StringBuilder.heading(text: String) {
         appendLine()
