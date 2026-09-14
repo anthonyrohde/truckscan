@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.anthonyrohde.truckscan.core.adapter.CanBus
 import com.anthonyrohde.truckscan.core.ford.AsBuiltSnapshot
+import com.anthonyrohde.truckscan.core.ford.VehicleProfiles
 import com.anthonyrohde.truckscan.core.pid.Pid
 import com.anthonyrohde.truckscan.core.pid.PidCatalog
 import com.anthonyrohde.truckscan.core.pid.PidValue
@@ -572,7 +573,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 answered = failure == null,
                 detail = failure ?: discovered.identification?.partNumber.orEmpty(),
             )
-        }
+        } + missedModuleLines()
 
         // result.faults, not result.dtcs. A module answers a status-mask read
         // with its whole DTC table, and listing all of it put this truck's three
@@ -621,6 +622,35 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
             recentLog = log.entries.value.takeLast(DIAGNOSTIC_LOG_LINES)
                 .map { "${it.time}  ${it.message}" },
         ).render()
+    }
+
+    /**
+     * Known addresses a module scan tried and got nothing back from.
+     *
+     * A quick or full scan always probes every address in [VehicleProfiles],
+     * but [_modules] only ever holds what answered - the misses were being
+     * thrown away the moment the scan finished, leaving no record of them
+     * anywhere except the raw adapter log, which a long enough session
+     * truncates away before anyone reads the report. Recomputing the miss set
+     * here means BCM/PAM/APIM not answering shows up in the report itself,
+     * for as long as the session lasts, rather than only in however much of
+     * the log survived.
+     */
+    private fun missedModuleLines(): List<DiagnosticReport.ModuleLine> {
+        if (lastModuleScan == null) return emptyList()
+        val foundAddresses = _modules.value.map { it.module.requestId }.toSet()
+        return VehicleProfiles.SUPER_DUTY_2022.map { it.requestId }.distinct()
+            .filterNot { it in foundAddresses }
+            .mapNotNull { requestId -> VehicleProfiles.moduleForRequestId(requestId) }
+            .map { module ->
+                DiagnosticReport.ModuleLine(
+                    name = module.code,
+                    address = Hex.encode(module.requestId, 3),
+                    bus = "-",
+                    answered = false,
+                    detail = "no answer on any scanned bus",
+                )
+            }
     }
 
     // ------------------------------------------------------------------ probe
