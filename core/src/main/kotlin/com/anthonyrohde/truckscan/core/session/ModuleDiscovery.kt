@@ -62,15 +62,23 @@ class ModuleDiscovery(
     /**
      * Probes [addresses] on [bus].
      *
-     * @param probeTimeoutMillis per-address wait. The default is tight on
-     *   purpose: a full 256-address sweep at 2 s per miss would take eight
-     *   minutes, and an absent module answers in well under 150 ms or not
-     *   at all.
+     * @param probeTimeoutMillis per-address wait. Must clear
+     *   [ElmAdapter.ADAPTER_RESPONSE_CEILING_MS]: the adapter times out each
+     *   unanswered command on its own, and a shorter deadline here means this
+     *   code moves on to the next address first, sending a command the
+     *   adapter reads as an interruption of the one before it. It replies
+     *   `STOPPED` rather than `NO DATA` when that happens, and any answer
+     *   that a probed address was about to give is lost rather than read -
+     *   measured on a 256-address full sweep, which found nothing at all
+     *   with a 150 ms deadline, PCM included, despite PCM answering
+     *   immediately once real requests followed. A full 256-address sweep at
+     *   2 s per miss would take eight minutes; this default keeps it to
+     *   about a minute instead.
      */
     suspend fun scanBus(
         bus: CanBus,
         addresses: List<Int> = VehicleProfiles.discoveryAddresses(),
-        probeTimeoutMillis: Long = 150,
+        probeTimeoutMillis: Long = ElmAdapter.ADAPTER_RESPONSE_CEILING_MS + 50,
         readIdentification: Boolean = true,
         onProgress: ((DiscoveryProgress) -> Unit)? = null,
     ): List<DiscoveredModule> {
@@ -174,13 +182,15 @@ class ModuleDiscovery(
         val addresses = VehicleProfiles.SUPER_DUTY_2022
             .map { it.requestId }
             .distinct()
-        // A more generous wait than the full sweep uses, because the cost of
-        // waiting is per address and there are twenty-odd here rather than 256.
-        // Measured on the truck: a module answers in 56-64 ms and an empty
-        // address is ruled out in 120-137 ms, so 150 was only about twice the
-        // observed answer time. That is a thin margin on a bus with an engine
-        // running on it, and the penalty for being wrong is a module that
-        // silently does not exist.
+        // A more generous wait than the full sweep's default, because the cost
+        // of waiting is per address and there are twenty-odd here rather than
+        // 256. Measured on the truck: a module answers in 56-64 ms. An address
+        // with nothing wired to it errors out almost immediately, but an
+        // address that is wired and simply unanswered has to clear the
+        // adapter's own ADAPTER_RESPONSE_CEILING_MS first, and this is that
+        // ceiling plus a real margin rather than a bare minimum - a thin
+        // margin on a bus with an engine running on it, and the penalty for
+        // being wrong is a module that silently does not exist.
         return scanBus(bus, addresses, probeTimeoutMillis = 300, onProgress = onProgress)
     }
 

@@ -145,6 +145,22 @@ class ElmAdapter(
         const val DEFAULT_TIMEOUT_MS = 2_000L
         private const val RESET_TIMEOUT_MS = 6_000L
 
+        /**
+         * The adapter's own per-command ceiling, set via `ATST 32` in [connect]
+         * (0x32 = 50 units of 4.096 ms, about 205 ms).
+         *
+         * This is a second, independent timeout that the adapter enforces on
+         * itself, on top of whatever deadline a caller passes to a single read.
+         * Any caller whose deadline is shorter than this gives up first and
+         * sends its next command while the adapter is still internally
+         * waiting on the last one - the adapter aborts that wait with
+         * `STOPPED` rather than the `NO DATA` it would otherwise have given,
+         * discarding a real answer if there was one rather than reporting it.
+         * A caller that issues one command per read (discovery's per-address
+         * probe, in particular) must use a deadline comfortably above this.
+         */
+        const val ADAPTER_RESPONSE_CEILING_MS = 205L
+
         /** Status words the adapter emits that are not frame data. */
         private val STATUS_WORDS = mapOf(
             "NO DATA" to AdapterResponse.Status.NO_DATA,
@@ -189,8 +205,8 @@ class ElmAdapter(
                 log("Adapter rejected '$cmd' - continuing, some clones omit it")
             }
         }
-        // 200 ms per-request ceiling. Long enough for a slow module, short
-        // enough that probing 40 addresses does not take a minute.
+        // See ADAPTER_RESPONSE_CEILING_MS: long enough for a slow module,
+        // short enough that probing 40 addresses does not take a minute.
         rawCommand("ATST 32")
 
         val ati = rawCommand("ATI").lines.lastOrNull { it.isNotBlank() } ?: elmId
